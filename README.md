@@ -12,19 +12,39 @@ The upstream MCP server is patched after each clone to add two tools missing fro
 
 ## Quick Start
 
+### Option A — one command (recommended)
+
 ```bash
-# 1. Clone and build the upstream repo
+bash scripts/init_full.sh
+```
+
+Then register the libraries in `App.tsx` using the `/add-libraries` Claude Code command or the `add-libraries` Cursor command, and start the canvas:
+
+```bash
+bash scripts/run_canvas.sh
+```
+
+Open <http://localhost:3000>.
+
+### Option B — step by step
+
+```bash
+# 1. Clone mcp_excalidraw, install dependencies, and build
 bash scripts/init.sh
 
-# 2. Download icon libraries
+# 2. Download icon libraries into library_cache/
 bash scripts/download_libraries.sh
 
 # 3. Copy libraries into the build
 cp library_cache/*.excalidrawlib mcp_excalidraw/frontend/public/libraries/
 
-# 4. Register the libraries in App.tsx and rebuild (see Cursor commands below)
+# 4. Register each library in App.tsx LIBRARY_FILES array and rebuild
+#    → run /add-libraries (Claude Code) or add-libraries (Cursor)
 
-# 5. Start the canvas server
+# 5. Patch the MCP server with list_libraries / list_library_items tools
+bash scripts/add_library_tools.sh
+
+# 6. Start the canvas server
 bash scripts/run_canvas.sh
 ```
 
@@ -34,10 +54,11 @@ Open <http://localhost:3000>.
 
 | Script | What it does |
 |---|---|
-| `scripts/init.sh` | Clones `mcp_excalidraw`, runs `npm ci` and `npm run build`. Safe to re-run — skips clone if the directory already exists. |
+| `scripts/init_full.sh` | Runs all setup steps in order: clone, download libraries, copy into build, patch MCP tools. |
+| `scripts/init.sh` | Clones `mcp_excalidraw`, runs `npm ci` and `npm run build`. Safe to re-run — skips clone if already exists. |
 | `scripts/download_libraries.sh` | Downloads `.excalidrawlib` icon packs into `library_cache/`. Skips already-cached files. |
-| `scripts/run_canvas.sh` | Starts the Excalidraw canvas server on port 3000. |
 | `scripts/add_library_tools.sh` | Patches the MCP server with `list_libraries` and `list_library_items` tools, then rebuilds. |
+| `scripts/run_canvas.sh` | Starts the Excalidraw canvas server on port 3000. |
 
 ## Cursor Commands
 
@@ -45,9 +66,10 @@ These live in `.cursor/commands/` and are available from Cursor's command palett
 
 | Command | Purpose |
 |---|---|
-| `init` | Full setup — clone, install, build, patch libraries. |
+| `init-full` | Complete setup in one go — runs all steps below in order. |
+| `init` | Clone `mcp_excalidraw`, install dependencies, and build. |
 | `download-libraries` | Download icon libraries into `library_cache/`. |
-| `add-libraries` | Copy cached libraries into the build, register them in `App.tsx`, and rebuild. Also documents available libraries and how to add new ones. |
+| `add-libraries` | Copy cached libraries into the build, register them in `App.tsx`, and rebuild. |
 | `add-library-tools` | Patch the MCP server with `list_libraries` and `list_library_items` tools, then rebuild. |
 
 ## Claude Code Commands
@@ -56,9 +78,10 @@ These live in `.claude/commands/` and are available as `/slash-commands` in Clau
 
 | Command | Purpose |
 |---|---|
-| `/init` | Full setup — clone, install, build, patch libraries. |
+| `/init-full` | Complete setup in one go — runs all steps below in order. |
+| `/init` | Clone `mcp_excalidraw`, install dependencies, and build. |
 | `/download-libraries` | Download icon libraries into `library_cache/`. |
-| `/add-libraries` | Copy cached libraries into the build, register them in `App.tsx`, and rebuild. Also documents available libraries and how to add new ones. |
+| `/add-libraries` | Copy cached libraries into the build, register them in `App.tsx`, and rebuild. |
 | `/add-library-tools` | Patch the MCP server with `list_libraries` and `list_library_items` tools, then rebuild. |
 
 ## MCP Setup
