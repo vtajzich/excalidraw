@@ -8,11 +8,11 @@ mkdir -p "$CACHE_DIR"
 
 URLS=(
   # Cloud & infra
-  "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/youritjang/cloud.excalidrawlib"
-  "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/diegolramirez/aws-serverless-icons-v2.excalidrawlib"
-  "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/pclavier92/gcp-icons.excalidrawlib"
-  "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/nicknisi/microsoft-365-icons.excalidrawlib"
-  "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/ajsmth/hashicorp.excalidrawlib"
+  "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/cloud/cloud.excalidrawlib"
+  "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/stojanovic/aws-serverless-icons-v2.excalidrawlib"
+  "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/clementbosc/gcp-icons.excalidrawlib"
+  "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/wictorwilen/microsoft-365-icons.excalidrawlib"
+  "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/mattias-fjellstrom/hashicorp.excalidrawlib"
   "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/lowess/kubernetes-icons-set.excalidrawlib"
 
   # Dev tools & languages (includes git, shell, GitHub, DevOps icons)

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -sL \"https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries.json\")",
+      "Bash(python3 -c \"import sys,json; libs=json.load\\(sys.stdin\\); [print\\(l.get\\(''''source'''',''''''''\\),l.get\\(''''name'''',''''''''\\)\\) for l in libs if any\\(k in l.get\\(''''name'''',''''''''\\).lower\\(\\) for k in [''''cloud'''',''''aws'''',''''gcp'''',''''microsoft 365'''',''''hashicorp'''']\\)]\")",
+      "mcp__excalidraw__batch_create_elements"
+    ]
+  }
+}

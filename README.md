@@ -46,6 +46,16 @@ These live in `.cursor/commands/` and are available from Cursor's command palett
 | `download-libraries` | Download icon libraries into `library_cache/`. |
 | `add-libraries` | Copy cached libraries into the build, register them in `App.tsx`, and rebuild. Also documents available libraries and how to add new ones. |
 
+## Claude Code Commands
+
+These live in `.claude/commands/` and are available as `/slash-commands` in Claude Code chat.
+
+| Command | Purpose |
+|---|---|
+| `/init` | Full setup — clone, install, build, patch libraries. |
+| `/download-libraries` | Download icon libraries into `library_cache/`. |
+| `/add-libraries` | Copy cached libraries into the build, register them in `App.tsx`, and rebuild. Also documents available libraries and how to add new ones. |
+
 ## Project Structure
 
 ```
@@ -59,11 +69,86 @@ These live in `.cursor/commands/` and are available from Cursor's command palett
 │       ├── init.md              # Setup command
 │       ├── download-libraries.md
 │       └── add-libraries.md
+├── .claude/
+│   └── commands/
+│       ├── init.md              # Setup command
+│       ├── download-libraries.md
+│       └── add-libraries.md
 ├── library_cache/               # Downloaded .excalidrawlib files (git-ignored)
 ├── mcp_excalidraw/              # Cloned upstream repo (git-ignored)
 ├── .gitignore
 └── README.md
 ```
+
+## MCP Setup
+
+First start the canvas server:
+```bash
+bash scripts/run_canvas.sh
+```
+
+Then open `http://localhost:3000` in a browser.
+
+### Claude Code
+
+```bash
+claude mcp add excalidraw --scope user \
+  -e EXPRESS_SERVER_URL=http://localhost:3000 \
+  -e ENABLE_CANVAS_SYNC=true \
+  -- node /path/to/excalidraw/mcp_excalidraw/dist/index.js
+```
+
+### Claude Desktop
+
+Config file:
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "excalidraw": {
+      "command": "node",
+      "args": ["/path/to/excalidraw/mcp_excalidraw/dist/index.js"],
+      "env": {
+        "EXPRESS_SERVER_URL": "http://localhost:3000",
+        "ENABLE_CANVAS_SYNC": "true"
+      }
+    }
+  }
+}
+```
+
+### Cursor
+
+Config file: `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global)
+
+```json
+{
+  "mcpServers": {
+    "excalidraw": {
+      "command": "node",
+      "args": ["/path/to/excalidraw/mcp_excalidraw/dist/index.js"],
+      "env": {
+        "EXPRESS_SERVER_URL": "http://localhost:3000",
+        "ENABLE_CANVAS_SYNC": "true"
+      }
+    }
+  }
+}
+```
+
+### Codex CLI
+
+```bash
+codex mcp add excalidraw \
+  --env EXPRESS_SERVER_URL=http://localhost:3000 \
+  --env ENABLE_CANVAS_SYNC=true \
+  -- node /path/to/excalidraw/mcp_excalidraw/dist/index.js
+```
+
+---
 
 ## Adding New Libraries
 
