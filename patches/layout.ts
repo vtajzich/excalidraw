@@ -246,6 +246,7 @@ export function runDagreLayout(
   }
 
   const relPositions = new Map<string, { x: number; y: number; w: number; h: number }>();
+  // Only populated for nodes that have a parentId — root nodes are handled by Pass B directly.
 
   // Build a node→parentId map for depth calculation
   const nodeParentMap = new Map(nodes.filter(n => n.parentId).map(n => [n.id, n.parentId!]));
@@ -307,7 +308,6 @@ export function runDagreLayout(
     });
   }
 
-  const parentSizes = computedSizes;
 
   // Pass B: layout root nodes + parents with correct sizes
   const g2 = new dagre.graphlib.Graph();
@@ -322,7 +322,7 @@ export function runDagreLayout(
     g2.setNode(id, { width: n.resolvedWidth, height: n.resolvedHeight });
   }
   for (const id of parentIds) {
-    const size = parentSizes.get(id) || { w: 100, h: 100 };
+    const size = computedSizes.get(id) || { w: 100, h: 100 };
     g2.setNode(id, { width: size.w, height: size.h });
   }
 
@@ -336,8 +336,10 @@ export function runDagreLayout(
 
   const results: ResolvedPosition[] = [];
 
-  // Root nodes: use Pass B positions directly
+  // Root nodes: use Pass B positions directly.
+  // Skip nodes that are also parents — they will be handled by the parentIds loop.
   for (const id of rootIds) {
+    if (childrenOf.has(id)) continue;
     const { x, y } = g2.node(id);
     const n = nodeMap.get(id)!;
     results.push({ id, x: x - n.resolvedWidth / 2, y: y - n.resolvedHeight / 2, width: n.resolvedWidth, height: n.resolvedHeight });
@@ -346,7 +348,7 @@ export function runDagreLayout(
   // Parents + their children: use Pass B for parent origin, Phase 3 sets final bbox
   for (const id of parentIds) {
     const { x, y } = g2.node(id);
-    const size = parentSizes.get(id)!;
+    const size = computedSizes.get(id)!;
     // Parent top-left from Pass B
     const parentOriginX = x - size.w / 2;
     const parentOriginY = y - size.h / 2;
@@ -360,6 +362,7 @@ export function runDagreLayout(
       if (pos.y < minChildY) minChildY = pos.y;
     }
 
+    // Normalize: Dagre's child coords may not start at (0,0); subtract the group's min offset.
     for (const cid of childIds) {
       const pos = relPositions.get(cid)!;
       results.push({
@@ -372,7 +375,8 @@ export function runDagreLayout(
     }
 
     // Phase 3: parent bbox from children
-    const childResults = results.filter(r => childIds.includes(r.id));
+    const childSet2 = new Set(childIds);
+    const childResults = results.filter(r => childSet2.has(r.id));
     const pMinX = Math.min(...childResults.map(r => r.x));
     const pMinY = Math.min(...childResults.map(r => r.y));
     const pMaxX = Math.max(...childResults.map(r => r.x + r.width));
