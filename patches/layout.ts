@@ -610,10 +610,37 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
 
   const elementMap = new Map(elements.map(e => [e.id, e]));
 
+  // Check for duplicate node IDs
+  const seenNodeIds = new Set<string>();
+  for (const node of args.nodes) {
+    if (seenNodeIds.has(node.id)) throw new Error(`Duplicate node id in nodes[]: ${node.id}`);
+    seenNodeIds.add(node.id);
+  }
+
   for (const node of args.nodes) {
     if (!elementMap.has(node.id)) throw new Error(`Node not found on canvas: ${node.id}`);
+    if (node.parentId && node.parentId === node.id) {
+      throw new Error(`Node "${node.id}" has parentId pointing to itself`);
+    }
     if (node.parentId && !args.nodes.some(n => n.id === node.parentId)) {
       throw new Error(`parentId "${node.parentId}" for node "${node.id}" is not in nodes[]`);
+    }
+  }
+
+  // Detect cycles in the parentId chain (would cause infinite recursion in runDagreLayout)
+  function parentChainHasCycle(startId: string): boolean {
+    const visited = new Set<string>();
+    let current: string | undefined = startId;
+    while (current) {
+      if (visited.has(current)) return true;
+      visited.add(current);
+      current = args.nodes.find(n => n.id === current)?.parentId;
+    }
+    return false;
+  }
+  for (const node of args.nodes) {
+    if (node.parentId && parentChainHasCycle(node.id)) {
+      throw new Error(`Cycle detected in parentId chain for node "${node.id}"`);
     }
   }
 
@@ -649,14 +676,24 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
   const posMap = new Map(positions.map(p => [p.id, p]));
 
   const arrowUpdates: (Partial<CanvasElement> & { id: string })[] = [];
-  const boundElementUpdates: (Partial<CanvasElement> & { id: string })[] = [];
+
+  // Track accumulated boundElements updates — merge per element to avoid write-after-write
+  const boundElementsAccum = new Map<string, { type: string; id: string }[]>();
+  function accumulateBound(el: CanvasElement, arrowId: string): void {
+    const current = boundElementsAccum.get(el.id) ?? [...(el.boundElements || [])];
+    if (!current.some(b => b.id === arrowId)) {
+      current.push({ type: 'arrow', id: arrowId });
+    }
+    boundElementsAccum.set(el.id, current);
+  }
+
+  const layoutNodeIds = new Set(args.nodes.map(n => n.id));
 
   for (const edge of args.edges) {
     const fromPos = posMap.get(edge.fromId);
     const toPos   = posMap.get(edge.toId);
     if (!fromPos || !toPos) continue;
 
-    const layoutNodeIds = new Set(args.nodes.map(n => n.id));
     const obstacles = allElements
       .filter(e => !layoutNodeIds.has(e.id) && e.width && e.height && e.type !== 'arrow')
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
@@ -681,17 +718,17 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
         startArrowhead: null,
         endArrowhead: 'arrow',
       };
-      await postElement(newArrow);
+      await postElement(newArrow); // Sequential: arrowId must be captured per-iteration for boundElements wiring
       arrowId = newArrow.id;
     } else {
       arrowUpdates.push({ id: arrowId, x: fromPt[0], y: fromPt[1], points: points as [number, number][], elbowed });
     }
 
-    // boundElements updates
+    // Accumulate boundElements (merged per element to avoid write-after-write)
     const fromEl = allElements.find(e => e.id === edge.fromId);
     const toEl   = allElements.find(e => e.id === edge.toId);
-    if (fromEl) boundElementUpdates.push(addBoundElement(fromEl, arrowId));
-    if (toEl)   boundElementUpdates.push(addBoundElement(toEl,   arrowId));
+    if (fromEl) accumulateBound(fromEl, arrowId);
+    if (toEl)   accumulateBound(toEl,   arrowId);
   }
 
   // Write node positions + arrow updates in parallel
@@ -700,7 +737,7 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
   await Promise.all([
     ...nodeUpdates.map(u => putElement(u)),
     ...arrowUpdates.map(u => putElement(u)),
-    ...boundElementUpdates.filter(u => Object.keys(u).length > 1).map(u => putElement(u)),
+    ...[...boundElementsAccum.entries()].map(([id, boundElements]) => putElement({ id, boundElements })),
   ]);
 
   return {
