@@ -15,7 +15,8 @@ function assert(condition, message) {
 }
 
 // ---- Import functions under test ----
-// We'll inline them here for now, then replace with imports after layout.ts exists.
+// Implementations are inlined to avoid a TypeScript compile step.
+// layout.ts is the source of truth; keep these in sync if geometry functions change.
 
 function cross2d(o, a, b) {
   return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);

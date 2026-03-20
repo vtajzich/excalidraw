@@ -67,9 +67,10 @@ export function getSideMidpoints(el: Box): SideMidpoints {
 }
 
 /**
- * Returns true if segment p1→p2 crosses the boundary of box.
- * Does NOT return true if segment is entirely inside — callers exclude
- * source and target elements before calling this.
+ * Returns true if segment p1→p2 properly crosses the boundary of box.
+ * Uses strict segment-crossing test: returns false if segment is entirely inside,
+ * or if it only grazes a corner without crossing (collinear/endpoint-touch not detected).
+ * Callers exclude source and target elements before calling this.
  */
 export function segmentIntersectsBox(p1: Point, p2: Point, box: Box): boolean {
   // Check if segment crosses any of the 4 box edges
@@ -156,16 +157,12 @@ export function routeArrow(
   const countA = countElbowIntersections(candidateA, obstacles);
   const countB = countElbowIntersections(candidateB, obstacles);
 
-  // Pick fewer intersections; tiebreak: prefer horizontal-first (A);
-  // secondary tiebreak: shorter path length
+  // Pick fewer intersections; tiebreak: prefer horizontal-first (A)
   let chosen = candidateA;
   if (countB < countA) {
     chosen = candidateB;
-  } else if (countB === countA) {
-    const lenA = Math.hypot(mid1[0]-fromPt[0], mid1[1]-fromPt[1]) + Math.hypot(toPt[0]-mid1[0], toPt[1]-mid1[1]);
-    const lenB = Math.hypot(mid2[0]-fromPt[0], mid2[1]-fromPt[1]) + Math.hypot(toPt[0]-mid2[0], toPt[1]-mid2[1]);
-    if (lenB < lenA) chosen = candidateB;
   }
+  // else: equal intersections — horizontal-first is preferred (candidateA already chosen)
 
   // Convert to relative coordinates
   const origin = chosen[0];
