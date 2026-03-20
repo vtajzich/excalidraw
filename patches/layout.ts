@@ -308,7 +308,6 @@ export function runDagreLayout(
     });
   }
 
-
   // Pass B: layout root nodes + parents with correct sizes
   const g2 = new dagre.graphlib.Graph();
   g2.setGraph({ rankdir, nodesep: spacing.nodeSep, ranksep: spacing.rankSep });
@@ -318,6 +317,7 @@ export function runDagreLayout(
   const parentIds = [...childrenOf.keys()].filter(k => k !== undefined) as string[];
 
   for (const id of rootIds) {
+    if (childrenOf.has(id)) continue; // root-parents are registered in the parentIds loop below
     const n = nodeMap.get(id)!;
     g2.setNode(id, { width: n.resolvedWidth, height: n.resolvedHeight });
   }
