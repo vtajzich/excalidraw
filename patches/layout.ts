@@ -528,7 +528,11 @@ export async function handleMoveElement(args: MoveElementArgs): Promise<object> 
   // Find connected arrows
   let arrowElements: CanvasElement[];
   if (args.arrowIds && args.arrowIds.length > 0) {
-    arrowElements = elements.filter(e => args.arrowIds!.includes(e.id));
+    arrowElements = elements.filter(
+      e => args.arrowIds!.includes(e.id) &&
+           e.type === 'arrow' &&
+           (e.start?.id === args.id || e.end?.id === args.id)
+    );
   } else {
     arrowElements = elements.filter(
       e => e.type === 'arrow' && (e.start?.id === args.id || e.end?.id === args.id)
