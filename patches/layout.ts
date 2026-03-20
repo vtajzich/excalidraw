@@ -392,3 +392,108 @@ export function runDagreLayout(
 
   return results;
 }
+
+// ---------------------------------------------------------------------------
+// HTTP helpers
+// ---------------------------------------------------------------------------
+
+async function fetchAllElements(): Promise<CanvasElement[]> {
+  const res = await fetch(`${EXPRESS_SERVER_URL}/api/elements`);
+  if (!res.ok) throw new Error(`Failed to fetch elements: ${res.status}`);
+  const data = await res.json() as { elements?: CanvasElement[] };
+  return data.elements || [];
+}
+
+async function putElement(el: Partial<CanvasElement> & { id: string }): Promise<void> {
+  const res = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${el.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(el),
+  });
+  if (!res.ok) throw new Error(`Failed to update element ${el.id}: ${res.status}`);
+}
+
+async function postElement(el: CanvasElement): Promise<CanvasElement> {
+  const res = await fetch(`${EXPRESS_SERVER_URL}/api/elements`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(el),
+  });
+  if (!res.ok) throw new Error(`Failed to create element: ${res.status}`);
+  const data = await res.json() as { element: CanvasElement };
+  return data.element;
+}
+
+function generateId(): string {
+  return Math.random().toString(36).slice(2, 11);
+}
+
+/** Add arrowId to element's boundElements array if not already present */
+function addBoundElement(
+  el: CanvasElement,
+  arrowId: string
+): Partial<CanvasElement> & { id: string } {
+  const existing = el.boundElements || [];
+  if (existing.some(b => b.id === arrowId)) return { id: el.id };
+  return { id: el.id, boundElements: [...existing, { type: 'arrow', id: arrowId }] };
+}
+
+// ---------------------------------------------------------------------------
+// create_arrow
+// ---------------------------------------------------------------------------
+
+interface CreateArrowArgs {
+  fromId: string;
+  toId: string;
+  label?: string;
+  style?: 'solid' | 'dashed' | 'dotted';
+  startArrowhead?: 'arrow' | 'dot' | 'bar' | null;
+  endArrowhead?: 'arrow' | 'dot' | 'bar' | null;
+  color?: string;
+}
+
+export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> {
+  const elements = await fetchAllElements();
+  const fromEl = elements.find(e => e.id === args.fromId);
+  const toEl   = elements.find(e => e.id === args.toId);
+  if (!fromEl) throw new Error(`Element not found: ${args.fromId}`);
+  if (!toEl)   throw new Error(`Element not found: ${args.toId}`);
+
+  const fromBox: Box = { x: fromEl.x, y: fromEl.y, width: fromEl.width || 100, height: fromEl.height || 60 };
+  const toBox:   Box = { x: toEl.x,   y: toEl.y,   width: toEl.width   || 100, height: toEl.height   || 60 };
+  const obstacles = elements
+    .filter(e => e.id !== args.fromId && e.id !== args.toId && e.type !== 'arrow' && e.width && e.height)
+    .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
+
+  const { fromPt } = nearestMidpointPair(fromBox, toBox);
+  const { points, elbowed } = routeArrow(fromBox, toBox, obstacles);
+
+  const arrowId = generateId();
+  const arrow: CanvasElement = {
+    id: arrowId,
+    type: 'arrow',
+    x: fromPt[0],
+    y: fromPt[1],
+    width: 0,
+    height: 0,
+    points: points as [number, number][],
+    elbowed,
+    start: { id: args.fromId, gap: 8 },
+    end:   { id: args.toId,   gap: 8 },
+    strokeColor: args.color || '#1e1e1e',
+    strokeStyle: args.style || 'solid',
+    startArrowhead: args.startArrowhead !== undefined ? args.startArrowhead : null,
+    endArrowhead:   args.endArrowhead   !== undefined ? args.endArrowhead   : 'arrow',
+    ...(args.label ? { label: { text: args.label } } : {}),
+  };
+
+  const created = await postElement(arrow);
+
+  // Update boundElements on source and target in parallel
+  await Promise.all([
+    putElement(addBoundElement(fromEl, arrowId)),
+    putElement(addBoundElement(toEl, arrowId)),
+  ]);
+
+  return { id: arrowId, element: created };
+}
