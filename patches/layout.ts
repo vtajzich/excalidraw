@@ -421,6 +421,7 @@ async function postElement(el: CanvasElement): Promise<CanvasElement> {
   });
   if (!res.ok) throw new Error(`Failed to create element: ${res.status}`);
   const data = await res.json() as { element: CanvasElement };
+  if (!data.element) throw new Error('postElement: unexpected response shape from server');
   return data.element;
 }
 
@@ -490,10 +491,13 @@ export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> 
   const created = await postElement(arrow);
 
   // Update boundElements on source and target in parallel
-  await Promise.all([
-    putElement(addBoundElement(fromEl, arrowId)),
-    putElement(addBoundElement(toEl, arrowId)),
-  ]);
+  const bindUpdates = [
+    addBoundElement(fromEl, arrowId),
+    addBoundElement(toEl, arrowId),
+  ].filter(u => Object.keys(u).length > 1);
+  if (bindUpdates.length > 0) {
+    await Promise.all(bindUpdates.map(u => putElement(u)));
+  }
 
   return { id: arrowId, element: created };
 }
