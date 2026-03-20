@@ -130,6 +130,9 @@ export function countElbowIntersections(waypoints: Point[], obstacles: Box[]): n
 
 /**
  * Route an arrow between two elements. Returns relative points[] and elbowed flag.
+ * Tries all 16 side-midpoint pairs (4 sides × 4 sides) to find the best path:
+ * - Prefers a straight line if any pair has a clear path (no obstacle intersections)
+ * - Falls back to elbow routing, picking the candidate with fewest intersections
  * obstacles: all canvas elements except from and to.
  */
 export function routeArrow(
@@ -137,13 +140,26 @@ export function routeArrow(
   to: Box,
   obstacles: Box[]
 ): { points: Point[]; elbowed: boolean; fromPt: Point } {
-  const { fromPt, toPt } = nearestMidpointPair(from, to);
+  const SIDES: (keyof SideMidpoints)[] = ['top', 'right', 'bottom', 'left'];
+  const fromPts = getSideMidpoints(from);
+  const toPts   = getSideMidpoints(to);
 
-  // Try straight line
-  const straightBlocked = obstacles.some(obs => segmentIntersectsBox(fromPt, toPt, obs));
+  // Phase 1: find the shortest clear straight path across all 16 pairs
+  let bestStraight: { fromPt: Point; toPt: Point; dist: number } | null = null;
+  for (const fk of SIDES) {
+    for (const tk of SIDES) {
+      const fp = fromPts[fk];
+      const tp = toPts[tk];
+      if (obstacles.some(obs => segmentIntersectsBox(fp, tp, obs))) continue;
+      const dist = Math.hypot(fp[0] - tp[0], fp[1] - tp[1]);
+      if (!bestStraight || dist < bestStraight.dist) {
+        bestStraight = { fromPt: fp, toPt: tp, dist };
+      }
+    }
+  }
 
-  if (!straightBlocked) {
-    // Relative to fromPt
+  if (bestStraight) {
+    const { fromPt, toPt } = bestStraight;
     return {
       points: [[0, 0], [toPt[0] - fromPt[0], toPt[1] - fromPt[1]]],
       elbowed: false,
@@ -151,29 +167,60 @@ export function routeArrow(
     };
   }
 
-  // Elbow candidates
-  const mid1: Point = [toPt[0], fromPt[1]]; // horizontal-first midpoint
-  const mid2: Point = [fromPt[0], toPt[1]]; // vertical-first midpoint
-
-  const candidateA: Point[] = [fromPt, mid1, toPt];
-  const candidateB: Point[] = [fromPt, mid2, toPt];
-
-  const countA = countElbowIntersections(candidateA, obstacles);
-  const countB = countElbowIntersections(candidateB, obstacles);
-
-  // Pick fewer intersections; tiebreak: prefer horizontal-first (A)
-  let chosen = candidateA;
-  if (countB < countA) {
-    chosen = candidateB;
+  // Phase 2: try all 32 elbow candidates (16 pairs × H-first + V-first)
+  interface ElbowCandidate {
+    waypoints: Point[];
+    fromPt: Point;
+    count: number;
+    isHorizontalFirst: boolean;
+    totalLength: number;
   }
-  // else: equal intersections — horizontal-first is preferred (candidateA already chosen)
+  let best: ElbowCandidate | null = null;
 
-  // Convert to relative coordinates
-  const origin = chosen[0] as Point;
+  for (const fk of SIDES) {
+    for (const tk of SIDES) {
+      const fp = fromPts[fk];
+      const tp = toPts[tk];
+
+      const midH: Point = [tp[0], fp[1]]; // horizontal-first
+      const midV: Point = [fp[0], tp[1]]; // vertical-first
+
+      for (const [mid, isH] of [[midH, true], [midV, false]] as [Point, boolean][]) {
+        const waypoints: Point[] = [fp, mid, tp];
+        const count = countElbowIntersections(waypoints, obstacles);
+        const totalLength =
+          Math.hypot(mid[0] - fp[0], mid[1] - fp[1]) +
+          Math.hypot(tp[0]  - mid[0], tp[1] - mid[1]);
+
+        const better =
+          !best ||
+          count < best.count ||
+          (count === best.count && isH && !best.isHorizontalFirst) ||
+          (count === best.count && isH === best.isHorizontalFirst && totalLength < best.totalLength);
+
+        if (better) {
+          best = { waypoints, fromPt: fp, count, isHorizontalFirst: isH, totalLength };
+        }
+      }
+    }
+  }
+
+  if (!best) {
+    // Unreachable: at least one candidate always exists
+    const fp = fromPts.right;
+    const tp = toPts.left;
+    return {
+      points: [[0, 0], [tp[0] - fp[0], tp[1] - fp[1]]],
+      elbowed: false,
+      fromPt: fp,
+    };
+  }
+
+  const origin = best.fromPt;
   return {
-    points: chosen.map(p => [p[0] - origin[0], p[1] - origin[1]] as Point),
+    points: best.waypoints.map(p => [p[0] - origin[0], p[1] - origin[1]] as Point),
     elbowed: true,
-    fromPt,
+    fromPt: origin,
   };
 }
 
