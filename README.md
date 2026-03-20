@@ -74,7 +74,7 @@ These live in `.cursor/commands/` and are available from Cursor's command palett
 | `download-libraries` | Download icon libraries into `library_cache/`. |
 | `add-libraries` | Copy cached libraries into the build, register them in `App.tsx`, and rebuild. |
 | `add-library-tools` | Patch the MCP server with `list_libraries` and `list_library_items` tools, then rebuild. |
-| `add-layout-tools` / `/add-layout-tools` | Patch MCP server with layout engine tools, then rebuild. |
+| `add-layout-tools` | Patch MCP server with layout engine tools, then rebuild. |
 
 ## Claude Code Commands
 
@@ -87,7 +87,7 @@ These live in `.claude/commands/` and are available as `/slash-commands` in Clau
 | `/download-libraries` | Download icon libraries into `library_cache/`. |
 | `/add-libraries` | Copy cached libraries into the build, register them in `App.tsx`, and rebuild. |
 | `/add-library-tools` | Patch the MCP server with `list_libraries` and `list_library_items` tools, then rebuild. |
-| `add-layout-tools` / `/add-layout-tools` | Patch MCP server with layout engine tools, then rebuild. |
+| `/add-layout-tools` | Patch MCP server with layout engine tools, then rebuild. |
 
 ## MCP Setup
 

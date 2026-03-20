@@ -22,7 +22,7 @@ let src = fs.readFileSync(TARGET, 'utf8');
 
 // Prerequisite check: library tools patch must be applied first
 const PREREQ_IMPORT = "import { libraryTools, handleLibraryTool } from './library-tools.js';";
-const PREREQ_PUSH   = "tools.push(...libraryTools);";
+const PREREQ_PUSH   = "tools.push(...libraryTools);"; // same string as TOOLS_ANCHOR — intentional: prereq check runs before any replacements
 if (!src.includes(PREREQ_IMPORT) || !src.includes(PREREQ_PUSH)) {
   console.error('ERROR: Library tools patch must be applied before layout tools patch.');
   console.error('Run: bash scripts/add_library_tools.sh');
