@@ -31,6 +31,12 @@ export interface LayoutSpacing {
   padding?: number;
 }
 
+export interface LayoutGroup {
+  id: string;
+  memberIds: string[];
+  rank: number;
+}
+
 interface CanvasElement {
   id: string;
   type: string;
@@ -271,7 +277,7 @@ export function detectCycle(
 // Dagre adapter — two-pass layout
 // ---------------------------------------------------------------------------
 
-interface ResolvedPosition {
+export interface ResolvedPosition {
   id: string;
   x: number;  // top-left
   y: number;
@@ -443,6 +449,59 @@ export function runDagreLayout(
   }
 
   return results;
+}
+
+/**
+ * Post-process Dagre layout output: snap grouped nodes to zone y-positions.
+ * All members of the same rank get the same y (top-left), stacked by rank with rankSep gap.
+ * Ungrouped nodes keep their Dagre y unchanged. Mutates positions in-place.
+ */
+export function applyGroupsYSnap(
+  positions: ResolvedPosition[],
+  groups: LayoutGroup[],
+  nodes: { id: string; resolvedHeight: number }[],
+  rankSep: number
+): void {
+  // Build memberId → rank
+  const memberRank = new Map<string, number>();
+  for (const group of groups) {
+    for (const memberId of group.memberIds) {
+      memberRank.set(memberId, group.rank);
+    }
+  }
+
+  // Height lookup: prefer positions (which may have been computed by containment)
+  const posHeightMap = new Map(positions.map(p => [p.id, p.height]));
+  const nodeHeightMap = new Map(nodes.map(n => [n.id, n.resolvedHeight]));
+  function getHeight(id: string): number {
+    return posHeightMap.get(id) ?? nodeHeightMap.get(id) ?? 60;
+  }
+
+  // Compute max height per rank (across all grouped nodes at that rank)
+  const maxHeightByRank = new Map<number, number>();
+  for (const pos of positions) {
+    const rank = memberRank.get(pos.id);
+    if (rank === undefined) continue;
+    const h = getHeight(pos.id);
+    const current = maxHeightByRank.get(rank) ?? 0;
+    if (h > current) maxHeightByRank.set(rank, h);
+  }
+
+  // Compute zone y-offsets: sort ranks ascending, accumulate
+  const sortedRanks = [...new Set([...memberRank.values()])].sort((a, b) => a - b);
+  const zoneYOffset = new Map<number, number>();
+  let cumY = 0;
+  for (const rank of sortedRanks) {
+    zoneYOffset.set(rank, cumY);
+    cumY += (maxHeightByRank.get(rank) ?? 60) + rankSep;
+  }
+
+  // Snap grouped nodes
+  for (const pos of positions) {
+    const rank = memberRank.get(pos.id);
+    if (rank === undefined) continue;
+    pos.y = zoneYOffset.get(rank) ?? pos.y;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -643,6 +702,7 @@ interface ApplyLayoutArgs {
   edges: LayoutEdge[];
   spacing?: LayoutSpacing;
   mode?: 'layout' | 'edges-only';
+  groups?: LayoutGroup[];
 }
 
 async function handleEdgesOnly(
@@ -793,6 +853,26 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
     if (cycle) throw new Error(cycle);
   }
 
+  // Validate groups (layout mode only — ignored in edges-only which was handled above)
+  if (args.groups && args.groups.length > 0) {
+    const memberGroupMap = new Map<string, string>();
+    const nodeWithParent = new Set(args.nodes.filter(n => n.parentId).map(n => n.id));
+    for (const group of args.groups) {
+      if (!Number.isInteger(group.rank) || group.rank < 0) {
+        throw new Error(`groups: rank must be a non-negative integer (got ${group.rank} in group "${group.id}")`);
+      }
+      for (const memberId of group.memberIds) {
+        if (memberGroupMap.has(memberId)) {
+          throw new Error(`memberId ${memberId} appears in multiple groups`);
+        }
+        memberGroupMap.set(memberId, group.id);
+        if (nodeWithParent.has(memberId)) {
+          throw new Error(`groups member ${memberId} is a child node; groups only supports root-level nodes`);
+        }
+      }
+    }
+  }
+
   if (args.nodes.length === 0) return { updated: 0, positions: [] };
 
   // Resolve node dimensions
@@ -813,6 +893,11 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
     args.direction || 'top-down',
     spacing
   );
+
+  // Apply zone y-snap if groups are provided
+  if (args.groups && args.groups.length > 0) {
+    applyGroupsYSnap(positions, args.groups, nodesWithSize, spacing.rankSep);
+  }
 
   // Phase 4: route arrows
   const allElements = await fetchAllElements(); // re-fetch for fresh obstacle list
@@ -941,6 +1026,19 @@ export const layoutTools: Tool[] = [
           type: 'string',
           enum: ['layout', 'edges-only'],
           description: 'layout (default): run Dagre and reposition nodes. edges-only: skip Dagre, route only the arrows in edges[] using current element positions — nodes are not moved.',
+        },
+        groups: {
+          type: 'array',
+          description: 'Zone/rank constraints. Members of the same zone are snapped to the same y-position after Dagre layout. Only applies in layout mode; ignored in edges-only mode. Each group member must be a root-level node (no parentId).',
+          items: {
+            type: 'object',
+            properties: {
+              id:        { type: 'string', description: 'Zone identifier (for reference only).' },
+              memberIds: { type: 'array', items: { type: 'string' }, description: 'Element IDs that belong to this zone.' },
+              rank:      { type: 'number', description: 'Zone rank — non-negative integer. Lower rank = higher on canvas (top-down). Multiple groups may share the same rank.' },
+            },
+            required: ['id', 'memberIds', 'rank'],
+          },
         },
       },
       required: ['nodes', 'edges'],

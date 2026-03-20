@@ -8,6 +8,7 @@ import {
   segmentIntersectsBox,
   countElbowIntersections,
   layoutTools,
+  applyGroupsYSnap,
 } from '../mcp_excalidraw/src/layout.ts';
 
 let passed = 0;
@@ -110,6 +111,61 @@ test('apply_layout tool schema algorithm is not required when mode is edges-only
   const required = (applyLayout!.inputSchema as { required: string[] }).required;
   // algorithm should no longer be required
   assert.strictEqual(required.includes('algorithm'), false, 'algorithm should not be required');
+});
+
+// ---------------------------------------------------------------------------
+// Task 4: applyGroupsYSnap — zone y-snap
+// ---------------------------------------------------------------------------
+console.log('\napplyGroupsYSnap — zone y-snap');
+
+test('snaps grouped nodes to zone y-offsets', () => {
+  // Three zones: rank 0, 1, 2
+  // rank 0 nodes: height=60, so zoneY[0]=0, zoneY[1]=0+60+60(ranksep)=120, zoneY[2]=120+80+60=260
+  const positions = [
+    { id: 'a', x: 0,   y: 999, width: 100, height: 60 }, // zone 0
+    { id: 'b', x: 150, y: 999, width: 100, height: 60 }, // zone 0
+    { id: 'c', x: 0,   y: 999, width: 100, height: 80 }, // zone 1
+    { id: 'd', x: 0,   y: 999, width: 100, height: 60 }, // zone 2
+  ];
+  const groups = [
+    { id: 'zone0', memberIds: ['a', 'b'], rank: 0 },
+    { id: 'zone1', memberIds: ['c'],      rank: 1 },
+    { id: 'zone2', memberIds: ['d'],      rank: 2 },
+  ];
+  const nodes = [
+    { id: 'a', resolvedHeight: 60 },
+    { id: 'b', resolvedHeight: 60 },
+    { id: 'c', resolvedHeight: 80 },
+    { id: 'd', resolvedHeight: 60 },
+  ];
+  applyGroupsYSnap(positions, groups, nodes, 60);
+
+  // zone 0: y = 0
+  assert.strictEqual(positions.find(p => p.id === 'a')!.y, 0);
+  assert.strictEqual(positions.find(p => p.id === 'b')!.y, 0);
+  // zone 1: y = maxHeight(zone0) + rankSep = 60 + 60 = 120
+  assert.strictEqual(positions.find(p => p.id === 'c')!.y, 120);
+  // zone 2: y = 120 + maxHeight(zone1) + rankSep = 120 + 80 + 60 = 260
+  assert.strictEqual(positions.find(p => p.id === 'd')!.y, 260);
+});
+
+test('ungrouped nodes keep their Dagre y unchanged', () => {
+  const positions = [
+    { id: 'a', x: 0, y: 50,  width: 100, height: 60 }, // grouped
+    { id: 'b', x: 0, y: 999, width: 100, height: 60 }, // ungrouped
+  ];
+  const groups = [{ id: 'z', memberIds: ['a'], rank: 0 }];
+  const nodes = [{ id: 'a', resolvedHeight: 60 }, { id: 'b', resolvedHeight: 60 }];
+  applyGroupsYSnap(positions, groups, nodes, 40);
+
+  assert.strictEqual(positions.find(p => p.id === 'a')!.y, 0);  // snapped to rank 0 = y=0
+  assert.strictEqual(positions.find(p => p.id === 'b')!.y, 999); // unchanged
+});
+
+test('apply_layout schema includes groups parameter', () => {
+  const applyLayout = layoutTools.find(t => t.name === 'apply_layout');
+  const props = (applyLayout!.inputSchema as { properties: Record<string, unknown> }).properties;
+  assert.ok('groups' in props, 'groups parameter is in schema');
 });
 
 // ---------------------------------------------------------------------------
