@@ -118,8 +118,11 @@ export function nearestMidpointPair(
 export function countElbowIntersections(waypoints: Point[], obstacles: Box[]): number {
   let count = 0;
   for (let i = 0; i < waypoints.length - 1; i++) {
+    const a = waypoints[i];
+    const b = waypoints[i + 1];
+    if (a === undefined || b === undefined) continue;
     for (const box of obstacles) {
-      if (segmentIntersectsBox(waypoints[i], waypoints[i + 1], box)) count++;
+      if (segmentIntersectsBox(a, b, box)) count++;
     }
   }
   return count;
@@ -165,7 +168,7 @@ export function routeArrow(
   // else: equal intersections — horizontal-first is preferred (candidateA already chosen)
 
   // Convert to relative coordinates
-  const origin = chosen[0];
+  const origin = chosen[0] as Point;
   return {
     points: chosen.map(p => [p[0] - origin[0], p[1] - origin[1]] as Point),
     elbowed: true,

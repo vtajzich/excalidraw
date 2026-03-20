@@ -18,6 +18,8 @@ The upstream MCP server is patched after each clone to add two tools missing fro
 bash scripts/init_full.sh
 ```
 
+This handles all 5 steps: clone and build, download libraries, copy into build, patch library tools, and patch layout tools.
+
 Then register the libraries in `App.tsx` using the `/add-libraries` Claude Code command or the `add-libraries` Cursor command, and start the canvas:
 
 ```bash
@@ -58,6 +60,7 @@ Open <http://localhost:3000>.
 | `scripts/init.sh` | Clones `mcp_excalidraw`, runs `npm ci` and `npm run build`. Safe to re-run — skips clone if already exists. |
 | `scripts/download_libraries.sh` | Downloads `.excalidrawlib` icon packs into `library_cache/`. Skips already-cached files. |
 | `scripts/add_library_tools.sh` | Patches the MCP server with `list_libraries` and `list_library_items` tools, then rebuilds. |
+| `scripts/add_layout_tools.sh` | Installs dagre and patches MCP server with `apply_layout`, `move_element`, `create_arrow` tools. Idempotent. |
 | `scripts/run_canvas.sh` | Starts the Excalidraw canvas server on port 3000. |
 
 ## Cursor Commands
@@ -71,6 +74,7 @@ These live in `.cursor/commands/` and are available from Cursor's command palett
 | `download-libraries` | Download icon libraries into `library_cache/`. |
 | `add-libraries` | Copy cached libraries into the build, register them in `App.tsx`, and rebuild. |
 | `add-library-tools` | Patch the MCP server with `list_libraries` and `list_library_items` tools, then rebuild. |
+| `add-layout-tools` / `/add-layout-tools` | Patch MCP server with layout engine tools, then rebuild. |
 
 ## Claude Code Commands
 
@@ -83,6 +87,7 @@ These live in `.claude/commands/` and are available as `/slash-commands` in Clau
 | `/download-libraries` | Download icon libraries into `library_cache/`. |
 | `/add-libraries` | Copy cached libraries into the build, register them in `App.tsx`, and rebuild. |
 | `/add-library-tools` | Patch the MCP server with `list_libraries` and `list_library_items` tools, then rebuild. |
+| `add-layout-tools` / `/add-layout-tools` | Patch MCP server with layout engine tools, then rebuild. |
 
 ## MCP Setup
 
