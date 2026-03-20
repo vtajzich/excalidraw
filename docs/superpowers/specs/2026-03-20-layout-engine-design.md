@@ -59,21 +59,21 @@ Note: this script is distinct from `scripts/add_library_tools.sh` (which patches
 
 The library tools patch (`patch-index.mjs`) already modified `src/index.ts` by inserting `tools.push(...libraryTools);` after the tools array. The layout patcher must anchor on the post-library-patch state of the file.
 
-Three idempotent edits to `src/index.ts`:
+Three idempotent edits to `src/index.ts`, all using the same insertion strategy as `patch-index.mjs`: `str.replace(ANCHOR, ANCHOR + '\n' + ADDITION)`.
 
-1. **Import** — guard: check for `from './layout.js'` before applying. Anchor: insert after `import { libraryTools, handleLibraryTool } from './library-tools.js';`
+1. **Import** — guard: check for `from './layout.js'` before applying. Anchor: the exact string `import { libraryTools, handleLibraryTool } from './library-tools.js';`
    ```ts
    import { layoutTools, handleLayoutTool } from './layout.js';
    ```
 
-2. **Tools registration** — guard: check for `layoutTools` before applying. Anchor: insert after `tools.push(...libraryTools);`
+2. **Tools registration** — guard: check for `layoutTools` before applying. Anchor: the exact string `tools.push(...libraryTools);`
    ```ts
    tools.push(...layoutTools);
    ```
 
-3. **Switch cases** — guard: check for `case 'apply_layout':` before applying. Anchor: insert before `default:` in the main tool dispatch switch (same anchor as library tools patch, which inserts before the same `default:`; order of cases does not matter).
+3. **Switch cases** — guard: check for `case 'apply_layout':` before applying. Anchor: insert before `default:` in the main tool dispatch switch (same anchor as library tools patch; case order does not matter).
 
-If `add_library_tools.sh` has not been run first, `patch-index-layout.mjs` exits with a clear error: `"Library tools patch must be applied before layout tools patch"`.
+If `add_library_tools.sh` has not been run first (i.e., neither anchor string 1 nor 2 is present in `src/index.ts`), `patch-index-layout.mjs` exits with a clear error: `"Library tools patch must be applied before layout tools patch"`.
 
 ---
 
@@ -85,23 +85,22 @@ Runs a layout algorithm on canvas elements. Accepts metadata for parent-child co
 
 ```typescript
 apply_layout({
-  algorithm: "hierarchical" | "flow",
+  algorithm: "hierarchical" | "flow",      // required
   // "hierarchical": top-down or left-right tree; Dagre rankdir TB or LR
-  // "flow": same algorithm, direction driven by edge source→sink ordering;
-  //         differs from hierarchical in that rank assignment strictly
-  //         follows edge direction (no back-edges promoted)
+  // "flow": DAG pipeline layout; cycles are a hard error (pre-Dagre topological
+  //         sort validates acyclicity before any layout runs)
   direction: "top-down" | "left-right",     // default: "top-down"
   elementIds?: string[],                    // pre-filter: only layout these elements
                                             // omit to layout all canvas elements
                                             // nodes[] is then scoped to this set
-  nodes: [{
+  nodes: [{                                 // required; empty array is valid (no-op)
     id: string,                             // element ID on canvas
     parentId?: string,                      // declares containment: parent box will
                                             // be resized to physically contain this node
     width?: number,                         // size hint — falls back to element's actual width
     height?: number,
   }],
-  edges: [{
+  edges: [{                                 // required; empty array is valid (no-op)
     fromId: string,
     toId: string,
     arrowId?: string,                       // update existing arrow — ID returned by
@@ -138,6 +137,8 @@ move_element({
 
 **Arrow auto-detection:** scans all canvas elements for arrows where `el.start?.id === id` or `el.end?.id === id` (the shorthand fields stored in the Express element map, not the resolved `startBinding`/`endBinding` objects).
 
+**Arrow rerouting:** re-runs the full Phase 4 arrow routing algorithm for each affected arrow (not a simple coordinate translation). This ensures arrows avoid other elements even after the move changes the path geometry. Updates are written via parallel `PUT /api/elements/:id` calls.
+
 ### `create_arrow`
 
 Creates a routed arrow connecting two existing elements by ID. Simpler interface than `create_element` with `type: 'arrow'`. Returns an `id` that can be passed as `arrowId` in subsequent `apply_layout` edge entries.
@@ -173,10 +174,10 @@ Dagre is run twice to avoid the circular dependency between child positions and 
 For each unique `parentId` group, build a Dagre sub-graph of the children only (not the parent node itself). Run Dagre with `nodesep`/`ranksep` from `spacing`. Record each child's relative position within its group (`x_rel`, `y_rel` from Dagre output).
 
 **Pass B — top-level graph:**
-Compute each parent's size from its children's bounding box (max child x+width − min child x, plus 2×padding). Build the top-level Dagre graph with all root nodes (nodes without `parentId`) plus each parent node using its now-correct computed size. Run Dagre again to get final absolute positions for all root nodes and parent nodes.
+Compute each parent's size from its children's bounding box (max child x+width − min child x, plus 2×padding). Build the top-level Dagre graph with all root nodes (nodes without `parentId`) plus each parent node using its now-correct computed size. Run Dagre to determine inter-node spacing and relative ordering of the top-level elements. The Dagre-assigned `x,y` for parent nodes is used only to derive relative spacing between parents — **final absolute `x,y` of each parent box is always set by Phase 3** (from the children's bounding box), not by Dagre.
 
 **Final position resolution:**
-For each parent: offset its children's relative positions by `parent.x + padding`, `parent.y + padding` to produce absolute canvas coordinates.
+For each parent: offset its children's relative positions by `parent.x + padding`, `parent.y + padding` to produce absolute canvas coordinates. Children are placed first; the parent box is then sized and positioned around them.
 
 **Algorithm modes:**
 - **Hierarchical:** `rankdir: TB` or `LR`. Standard Sugiyama layering with crossing minimisation.
@@ -193,7 +194,7 @@ parent.width  = (max(children.x + child.width)  - min(children.x)) + 2 * padding
 parent.height = (max(children.y + child.height) - min(children.y)) + 2 * padding
 ```
 
-Processed bottom-up (leaves first) so nested containment (grandparent wraps parent wraps children) resolves correctly. Parent `zIndex` is set lower than children so children render on top.
+Processed bottom-up (leaves first) so nested containment (grandparent wraps parent wraps children) resolves correctly. Parent render order is set lower than children by assigning the parent a lower `index` fractional string than its children, so children render on top. (`zIndex` does not exist on `ServerElement`; Excalidraw controls render order via the `index` field.)
 
 ### Phase 4 — Arrow Routing
 
@@ -220,7 +221,7 @@ For each edge in `edges[]` (and for `create_arrow` and `move_element` rerouting)
 
 5. **Bindings:** set `start: { id: fromId }` and `end: { id: toId }` (shorthand format used by Express element store) with `gap: 8`. Also update `boundElements` on source and target elements: add `{ type: 'arrow', id: arrowId }` to each if not already present.
 
-6. **Batch update:** all modified elements (repositioned nodes + rerouted arrows + updated parent boxes + updated `boundElements`) are sent in a single batch update call to the Express API.
+6. **Updates:** all modified elements (repositioned nodes + rerouted arrows + updated parent boxes + updated `boundElements`) are written via parallel `PUT /api/elements/:id` calls — one per modified element. There is no batch-update endpoint on the Express server (`POST /api/elements/batch` is create-only; `POST /api/elements/sync` is destructive). Parallel calls are used for throughput; the layout engine awaits `Promise.all([...])` before returning results.
 
 ---
 
@@ -240,8 +241,7 @@ All three tools follow the existing MCP error convention:
 Common error cases to handle:
 - Element ID not found on canvas
 - `parentId` references an ID not in the working set
-- Cycle detected in `flow` mode
-- `apply_layout` called before `nodes[]` or `edges[]` are provided
+- Cycle detected in `flow` mode: detected via pre-Dagre topological sort (DFS); returns error immediately before any layout runs
 - Arrow auto-detection in `move_element` finds no connected arrows (not an error — return empty `arrows: []`)
 
 ---
