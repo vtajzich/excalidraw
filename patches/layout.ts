@@ -580,3 +580,227 @@ export async function handleMoveElement(args: MoveElementArgs): Promise<object> 
     arrows: updatedArrows.map(a => finalElements.find(e => e.id === a.id)).filter(Boolean),
   };
 }
+
+// ---------------------------------------------------------------------------
+// apply_layout
+// ---------------------------------------------------------------------------
+
+interface ApplyLayoutArgs {
+  algorithm: 'hierarchical' | 'flow';
+  direction?: 'top-down' | 'left-right';
+  elementIds?: string[];
+  nodes: LayoutNode[];
+  edges: LayoutEdge[];
+  spacing?: LayoutSpacing;
+}
+
+export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> {
+  const spacing: Required<LayoutSpacing> = {
+    nodeSep: args.spacing?.nodeSep ?? 40,
+    rankSep: args.spacing?.rankSep ?? 60,
+    padding: args.spacing?.padding ?? 20,
+  };
+
+  // Phase 1: fetch and validate
+  let elements = await fetchAllElements();
+  if (args.elementIds && args.elementIds.length > 0) {
+    const idSet = new Set(args.elementIds);
+    elements = elements.filter(e => idSet.has(e.id));
+  }
+
+  const elementMap = new Map(elements.map(e => [e.id, e]));
+
+  for (const node of args.nodes) {
+    if (!elementMap.has(node.id)) throw new Error(`Node not found on canvas: ${node.id}`);
+    if (node.parentId && !args.nodes.some(n => n.id === node.parentId)) {
+      throw new Error(`parentId "${node.parentId}" for node "${node.id}" is not in nodes[]`);
+    }
+  }
+
+  // Cycle detection for flow mode
+  if (args.algorithm === 'flow') {
+    const cycle = detectCycle(args.nodes, args.edges);
+    if (cycle) throw new Error(cycle);
+  }
+
+  if (args.nodes.length === 0) return { updated: 0, positions: [] };
+
+  // Resolve node dimensions
+  const nodesWithSize = args.nodes.map(n => {
+    const el = elementMap.get(n.id)!;
+    return {
+      ...n,
+      resolvedWidth:  n.width  ?? (el.width  || 120),
+      resolvedHeight: n.height ?? (el.height || 60),
+    };
+  });
+
+  // Phase 2+3: run layout
+  const positions = runDagreLayout(
+    nodesWithSize,
+    args.edges,
+    args.algorithm,
+    args.direction || 'top-down',
+    spacing
+  );
+
+  // Phase 4: route arrows
+  const allElements = await fetchAllElements(); // re-fetch for fresh obstacle list
+  const posMap = new Map(positions.map(p => [p.id, p]));
+
+  const arrowUpdates: (Partial<CanvasElement> & { id: string })[] = [];
+  const boundElementUpdates: (Partial<CanvasElement> & { id: string })[] = [];
+
+  for (const edge of args.edges) {
+    const fromPos = posMap.get(edge.fromId);
+    const toPos   = posMap.get(edge.toId);
+    if (!fromPos || !toPos) continue;
+
+    const layoutNodeIds = new Set(args.nodes.map(n => n.id));
+    const obstacles = allElements
+      .filter(e => !layoutNodeIds.has(e.id) && e.width && e.height && e.type !== 'arrow')
+      .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
+
+    const { fromPt } = nearestMidpointPair(fromPos, toPos);
+    const { points, elbowed } = routeArrow(fromPos, toPos, obstacles);
+
+    let arrowId = edge.arrowId;
+    if (!arrowId) {
+      // Create new arrow
+      const newArrow: CanvasElement = {
+        id: generateId(),
+        type: 'arrow',
+        x: fromPt[0], y: fromPt[1],
+        width: 0, height: 0,
+        points: points as [number, number][],
+        elbowed,
+        start: { id: edge.fromId, gap: 8 },
+        end:   { id: edge.toId,   gap: 8 },
+        strokeColor: '#1e1e1e',
+        strokeStyle: 'solid',
+        startArrowhead: null,
+        endArrowhead: 'arrow',
+      };
+      await postElement(newArrow);
+      arrowId = newArrow.id;
+    } else {
+      arrowUpdates.push({ id: arrowId, x: fromPt[0], y: fromPt[1], points: points as [number, number][], elbowed });
+    }
+
+    // boundElements updates
+    const fromEl = allElements.find(e => e.id === edge.fromId);
+    const toEl   = allElements.find(e => e.id === edge.toId);
+    if (fromEl) boundElementUpdates.push(addBoundElement(fromEl, arrowId));
+    if (toEl)   boundElementUpdates.push(addBoundElement(toEl,   arrowId));
+  }
+
+  // Write node positions + arrow updates in parallel
+  const nodeUpdates = positions.map(p => ({ id: p.id, x: p.x, y: p.y, width: p.width, height: p.height }));
+
+  await Promise.all([
+    ...nodeUpdates.map(u => putElement(u)),
+    ...arrowUpdates.map(u => putElement(u)),
+    ...boundElementUpdates.filter(u => Object.keys(u).length > 1).map(u => putElement(u)),
+  ]);
+
+  return {
+    updated: nodeUpdates.length + arrowUpdates.length,
+    positions: positions.map(p => ({ id: p.id, x: p.x, y: p.y, width: p.width, height: p.height })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool definitions + dispatcher
+// ---------------------------------------------------------------------------
+
+export const layoutTools: Tool[] = [
+  {
+    name: 'apply_layout',
+    description: 'Arrange elements on the canvas using a configurable layout algorithm (hierarchical or flow). Supports parent-child containment, configurable spacing, and automatic arrow routing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        algorithm: { type: 'string', enum: ['hierarchical', 'flow'], description: 'Layout algorithm. hierarchical: Sugiyama layered tree. flow: DAG pipeline — cycles are an error.' },
+        direction: { type: 'string', enum: ['top-down', 'left-right'], description: 'Layout direction. Default: top-down.' },
+        elementIds: { type: 'array', items: { type: 'string' }, description: 'Optional subset of element IDs to layout. Omit to layout all.' },
+        nodes: {
+          type: 'array',
+          description: 'Node metadata. Empty array is valid (no-op).',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              parentId: { type: 'string', description: 'Parent element ID — parent box will expand to contain this node.' },
+              width: { type: 'number' },
+              height: { type: 'number' },
+            },
+            required: ['id'],
+          },
+        },
+        edges: {
+          type: 'array',
+          description: 'Edges to route. Empty array is valid (no-op).',
+          items: {
+            type: 'object',
+            properties: {
+              fromId: { type: 'string' },
+              toId: { type: 'string' },
+              arrowId: { type: 'string', description: 'Update existing arrow. Omit to create new arrow.' },
+            },
+            required: ['fromId', 'toId'],
+          },
+        },
+        spacing: {
+          type: 'object',
+          properties: {
+            nodeSep: { type: 'number', description: 'Dagre nodesep (px between siblings). Default: 40.' },
+            rankSep: { type: 'number', description: 'Dagre ranksep (px between layers). Default: 60.' },
+            padding: { type: 'number', description: 'Padding inside parent boxes. Default: 20.' },
+          },
+        },
+      },
+      required: ['algorithm', 'nodes', 'edges'],
+    },
+  },
+  {
+    name: 'move_element',
+    description: 'Move an element to new coordinates and automatically reroute all connected arrows. Optionally specify which arrows to reroute.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Element to move.' },
+        x: { type: 'number' },
+        y: { type: 'number' },
+        arrowIds: { type: 'array', items: { type: 'string' }, description: 'Override: only reroute these arrows. Omit to auto-detect all connected arrows.' },
+      },
+      required: ['id', 'x', 'y'],
+    },
+  },
+  {
+    name: 'create_arrow',
+    description: 'Create a routed arrow between two existing elements. Automatically routes straight if the path is clear, elbow if blocked. Returns the arrow ID for use in apply_layout edges.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fromId: { type: 'string' },
+        toId:   { type: 'string' },
+        label:  { type: 'string' },
+        style:  { type: 'string', enum: ['solid', 'dashed', 'dotted'], description: 'Default: solid.' },
+        startArrowhead: { type: 'string', enum: ['arrow', 'dot', 'bar'], nullable: true },
+        endArrowhead:   { type: 'string', enum: ['arrow', 'dot', 'bar'], nullable: true, description: 'Default: arrow.' },
+        color: { type: 'string' },
+      },
+      required: ['fromId', 'toId'],
+    },
+  },
+];
+
+export async function handleLayoutTool(
+  name: string,
+  args: Record<string, unknown>
+): Promise<object | null> {
+  if (name === 'apply_layout') return handleApplyLayout(args as unknown as ApplyLayoutArgs);
+  if (name === 'move_element') return handleMoveElement(args as unknown as MoveElementArgs);
+  if (name === 'create_arrow') return handleCreateArrow(args as unknown as CreateArrowArgs);
+  return null;
+}
