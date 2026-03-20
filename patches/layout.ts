@@ -501,3 +501,78 @@ export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> 
 
   return { id: arrowId, element: created };
 }
+
+// ---------------------------------------------------------------------------
+// move_element
+// ---------------------------------------------------------------------------
+
+interface MoveElementArgs {
+  id: string;
+  x: number;
+  y: number;
+  arrowIds?: string[];
+}
+
+export async function handleMoveElement(args: MoveElementArgs): Promise<object> {
+  const elements = await fetchAllElements();
+  const el = elements.find(e => e.id === args.id);
+  if (!el) throw new Error(`Element not found: ${args.id}`);
+
+  // Update element position
+  const updatedEl: Partial<CanvasElement> & { id: string } = {
+    id: args.id,
+    x: args.x,
+    y: args.y,
+  };
+
+  // Find connected arrows
+  let arrowElements: CanvasElement[];
+  if (args.arrowIds && args.arrowIds.length > 0) {
+    arrowElements = elements.filter(e => args.arrowIds!.includes(e.id));
+  } else {
+    arrowElements = elements.filter(
+      e => e.type === 'arrow' && (e.start?.id === args.id || e.end?.id === args.id)
+    );
+  }
+
+  // Reroute each affected arrow using full Phase 4 routing
+  const movedElBox: Box = { x: args.x, y: args.y, width: el.width || 100, height: el.height || 60 };
+  const updatedArrows: (Partial<CanvasElement> & { id: string })[] = [];
+
+  for (const arrow of arrowElements) {
+    const otherId = arrow.start?.id === args.id ? arrow.end?.id : arrow.start?.id;
+    const otherEl = otherId ? elements.find(e => e.id === otherId) : undefined;
+    if (!otherEl) continue;
+
+    const isFrom = arrow.start?.id === args.id;
+    const fromBox = isFrom ? movedElBox : { x: otherEl.x, y: otherEl.y, width: otherEl.width || 100, height: otherEl.height || 60 };
+    const toBox   = isFrom ? { x: otherEl.x, y: otherEl.y, width: otherEl.width || 100, height: otherEl.height || 60 } : movedElBox;
+
+    const obstacles = elements
+      .filter(e => e.id !== args.id && e.id !== otherId && e.id !== arrow.id && e.type !== 'arrow' && e.width && e.height)
+      .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
+
+    const { fromPt } = nearestMidpointPair(fromBox, toBox);
+    const { points, elbowed } = routeArrow(fromBox, toBox, obstacles);
+
+    updatedArrows.push({
+      id: arrow.id,
+      x: fromPt[0],
+      y: fromPt[1],
+      points: points as [number, number][],
+      elbowed,
+    });
+  }
+
+  // Write all updates in parallel
+  await Promise.all([
+    putElement(updatedEl),
+    ...updatedArrows.map(a => putElement(a)),
+  ]);
+
+  const finalElements = await fetchAllElements();
+  return {
+    element: finalElements.find(e => e.id === args.id),
+    arrows: updatedArrows.map(a => finalElements.find(e => e.id === a.id)).filter(Boolean),
+  };
+}
