@@ -136,7 +136,7 @@ export function routeArrow(
   from: Box,
   to: Box,
   obstacles: Box[]
-): { points: Point[]; elbowed: boolean } {
+): { points: Point[]; elbowed: boolean; fromPt: Point } {
   const { fromPt, toPt } = nearestMidpointPair(from, to);
 
   // Try straight line
@@ -147,6 +147,7 @@ export function routeArrow(
     return {
       points: [[0, 0], [toPt[0] - fromPt[0], toPt[1] - fromPt[1]]],
       elbowed: false,
+      fromPt,
     };
   }
 
@@ -172,6 +173,7 @@ export function routeArrow(
   return {
     points: chosen.map(p => [p[0] - origin[0], p[1] - origin[1]] as Point),
     elbowed: true,
+    fromPt,
   };
 }
 
@@ -469,8 +471,7 @@ export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> 
     .filter(e => e.id !== args.fromId && e.id !== args.toId && e.type !== 'arrow' && e.width && e.height)
     .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-  const { fromPt } = nearestMidpointPair(fromBox, toBox);
-  const { points, elbowed } = routeArrow(fromBox, toBox, obstacles);
+  const { points, elbowed, fromPt } = routeArrow(fromBox, toBox, obstacles);
 
   const arrowId = generateId();
   const arrow: CanvasElement = {
@@ -559,8 +560,7 @@ export async function handleMoveElement(args: MoveElementArgs): Promise<object> 
       .filter(e => e.id !== args.id && e.id !== otherId && e.id !== arrow.id && e.type !== 'arrow' && e.width && e.height)
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-    const { fromPt } = nearestMidpointPair(fromBox, toBox);
-    const { points, elbowed } = routeArrow(fromBox, toBox, obstacles);
+    const { points, elbowed, fromPt } = routeArrow(fromBox, toBox, obstacles);
 
     updatedArrows.push({
       id: arrow.id,
@@ -701,8 +701,7 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
       .filter(e => !layoutNodeIds.has(e.id) && e.width && e.height && e.type !== 'arrow')
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-    const { fromPt } = nearestMidpointPair(fromPos, toPos);
-    const { points, elbowed } = routeArrow(fromPos, toPos, obstacles);
+    const { points, elbowed, fromPt } = routeArrow(fromPos, toPos, obstacles);
 
     let arrowId = edge.arrowId;
     if (!arrowId) {
