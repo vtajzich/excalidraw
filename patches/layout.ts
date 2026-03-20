@@ -636,12 +636,95 @@ export async function handleMoveElement(args: MoveElementArgs): Promise<object> 
 // ---------------------------------------------------------------------------
 
 interface ApplyLayoutArgs {
-  algorithm: 'hierarchical' | 'flow';
+  algorithm?: 'hierarchical' | 'flow';  // optional: not needed for edges-only mode
   direction?: 'top-down' | 'left-right';
   elementIds?: string[];
   nodes: LayoutNode[];
   edges: LayoutEdge[];
   spacing?: LayoutSpacing;
+  mode?: 'layout' | 'edges-only';
+}
+
+async function handleEdgesOnly(
+  args: ApplyLayoutArgs,
+  _spacing: Required<LayoutSpacing>
+): Promise<object> {
+  const allElements = await fetchAllElements();
+  const elementMap = new Map(allElements.map(e => [e.id, e]));
+
+  // Track boundElements updates — merge per element
+  const boundElementsAccum = new Map<string, { type: string; id: string }[]>();
+  function accumulateBound(el: CanvasElement, arrowId: string): void {
+    const current = boundElementsAccum.get(el.id) ?? [...(el.boundElements || [])];
+    if (!current.some(b => b.id === arrowId)) {
+      current.push({ type: 'arrow', id: arrowId });
+    }
+    boundElementsAccum.set(el.id, current);
+  }
+
+  const arrowUpdates: (Partial<CanvasElement> & { id: string })[] = [];
+  let createdCount = 0;
+
+  for (const edge of args.edges) {
+    const fromEl = elementMap.get(edge.fromId);
+    const toEl   = elementMap.get(edge.toId);
+    if (!fromEl || !toEl) continue;
+
+    const fromBox: Box = { x: fromEl.x, y: fromEl.y, width: fromEl.width || 100, height: fromEl.height || 60 };
+    const toBox:   Box = { x: toEl.x,   y: toEl.y,   width: toEl.width   || 100, height: toEl.height   || 60 };
+
+    // Per-edge obstacle list: all non-arrow elements except this edge's endpoints
+    const obstacles = allElements
+      .filter(e => e.id !== edge.fromId && e.id !== edge.toId && e.type !== 'arrow' && e.width && e.height)
+      .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
+
+    const { points, elbowed, fromPt } = routeArrow(fromBox, toBox, obstacles);
+
+    let arrowId = edge.arrowId;
+    if (!arrowId) {
+      // Create new arrow (same as layout mode)
+      const newArrow: CanvasElement = {
+        id: generateId(),
+        type: 'arrow',
+        x: fromPt[0], y: fromPt[1],
+        width: 0, height: 0,
+        points: points as [number, number][],
+        elbowed,
+        start: { id: edge.fromId, gap: 8 },
+        end:   { id: edge.toId,   gap: 8 },
+        strokeColor: '#1e1e1e',
+        strokeStyle: 'solid',
+        startArrowhead: null,
+        endArrowhead: 'arrow',
+      };
+      await postElement(newArrow);
+      arrowId = newArrow.id;
+      createdCount++;
+    } else {
+      arrowUpdates.push({
+        id: arrowId,
+        x: fromPt[0], y: fromPt[1],
+        points: points as [number, number][],
+        elbowed,
+      });
+    }
+
+    if (fromEl) accumulateBound(fromEl, arrowId);
+    if (toEl)   accumulateBound(toEl,   arrowId);
+  }
+
+  // Write arrow updates + boundElements in parallel
+  await Promise.all([
+    ...arrowUpdates.map(u => putElement(u)),
+    ...[...boundElementsAccum.entries()].map(([id, boundElements]) =>
+      putElement({ id, boundElements })
+    ),
+  ]);
+
+  return {
+    updated: createdCount + arrowUpdates.length,
+    positions: [],
+  };
 }
 
 export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> {
@@ -650,6 +733,16 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
     rankSep: args.spacing?.rankSep ?? 60,
     padding: args.spacing?.padding ?? 20,
   };
+
+  // Route to edges-only handler
+  if (args.mode === 'edges-only') {
+    return handleEdgesOnly(args, spacing);
+  }
+
+  // layout mode requires algorithm
+  if (!args.algorithm) {
+    throw new Error('algorithm is required when mode is "layout" (or mode is omitted)');
+  }
 
   // Phase 1: fetch and validate
   let elements = await fetchAllElements();
@@ -806,7 +899,7 @@ export const layoutTools: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        algorithm: { type: 'string', enum: ['hierarchical', 'flow'], description: 'Layout algorithm. hierarchical: Sugiyama layered tree. flow: DAG pipeline — cycles are an error.' },
+        algorithm: { type: 'string', enum: ['hierarchical', 'flow'], description: 'Layout algorithm (required when mode is "layout"). hierarchical: Sugiyama layered tree. flow: DAG pipeline — cycles are an error.' },
         direction: { type: 'string', enum: ['top-down', 'left-right'], description: 'Layout direction. Default: top-down.' },
         elementIds: { type: 'array', items: { type: 'string' }, description: 'Optional subset of element IDs to layout. Omit to layout all.' },
         nodes: {
@@ -844,8 +937,13 @@ export const layoutTools: Tool[] = [
             padding: { type: 'number', description: 'Padding inside parent boxes. Default: 20.' },
           },
         },
+        mode: {
+          type: 'string',
+          enum: ['layout', 'edges-only'],
+          description: 'layout (default): run Dagre and reposition nodes. edges-only: skip Dagre, route only the arrows in edges[] using current element positions — nodes are not moved.',
+        },
       },
-      required: ['algorithm', 'nodes', 'edges'],
+      required: ['nodes', 'edges'],
     },
   },
   {

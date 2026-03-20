@@ -7,6 +7,7 @@ import {
   routeArrow,
   segmentIntersectsBox,
   countElbowIntersections,
+  layoutTools,
 } from '../mcp_excalidraw/src/layout.ts';
 
 let passed = 0;
@@ -88,6 +89,27 @@ test('countElbowIntersections: counts segments that cross an obstacle', () => {
   const obs = { x: 40, y: 10, width: 20, height: 80 };
   const count = countElbowIntersections([[0,50],[50,50],[50,200]], [obs]);
   assert.strictEqual(count, 2);
+});
+
+// ---------------------------------------------------------------------------
+// Task 3: apply_layout schema — mode parameter is in layoutTools
+// ---------------------------------------------------------------------------
+console.log('\napply_layout schema — mode parameter');
+
+test('apply_layout tool schema includes mode parameter', () => {
+  const applyLayout = layoutTools.find(t => t.name === 'apply_layout');
+  assert.ok(applyLayout, 'apply_layout tool exists');
+  const props = (applyLayout!.inputSchema as { properties: Record<string, unknown> }).properties;
+  assert.ok('mode' in props, 'mode parameter is in schema');
+  const modeProp = props['mode'] as { type: string; enum: string[] };
+  assert.deepStrictEqual(modeProp.enum, ['layout', 'edges-only']);
+});
+
+test('apply_layout tool schema algorithm is not required when mode is edges-only', () => {
+  const applyLayout = layoutTools.find(t => t.name === 'apply_layout');
+  const required = (applyLayout!.inputSchema as { required: string[] }).required;
+  // algorithm should no longer be required
+  assert.strictEqual(required.includes('algorithm'), false, 'algorithm should not be required');
 });
 
 // ---------------------------------------------------------------------------
