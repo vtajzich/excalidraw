@@ -109,5 +109,36 @@ const elbowA = [[0,50],[200,50],[250,50]];
 const elbowB = [[0,50],[0,150],[250,50]]; // second segment crosses obstacle too
 assert(countElbowIntersections(elbowA, [obstacle]) >= 1, 'blocked elbow has intersections');
 
+// ---- Cycle detection ----
+function detectCycle(nodes, edges) {
+  const ids = new Set(nodes.map(n => n.id));
+  const adj = new Map();
+  for (const id of ids) adj.set(id, []);
+  for (const e of edges) {
+    if (ids.has(e.fromId) && ids.has(e.toId)) adj.get(e.fromId).push(e.toId);
+  }
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Map();
+  for (const id of ids) color.set(id, WHITE);
+  function dfs(id) {
+    color.set(id, GRAY);
+    for (const next of adj.get(id) || []) {
+      if (color.get(next) === GRAY) return `${id} → ${next}`;
+      if (color.get(next) === WHITE) { const c = dfs(next); if (c) return c; }
+    }
+    color.set(id, BLACK);
+    return null;
+  }
+  for (const id of ids) {
+    if (color.get(id) === WHITE) { const c = dfs(id); if (c) return `Cycle detected: ${c}`; }
+  }
+  return null;
+}
+
+console.log('\n=== detectCycle ===');
+const nodesA = [{id:'a'},{id:'b'},{id:'c'}];
+assert(detectCycle(nodesA, [{fromId:'a',toId:'b'},{fromId:'b',toId:'c'}]) === null, 'DAG returns null');
+assert(typeof detectCycle(nodesA, [{fromId:'a',toId:'b'},{fromId:'b',toId:'c'},{fromId:'c',toId:'a'}]) === 'string', 'cycle returns error string');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
