@@ -194,7 +194,9 @@ parent.width  = (max(children.x + child.width)  - min(children.x)) + 2 * padding
 parent.height = (max(children.y + child.height) - min(children.y)) + 2 * padding
 ```
 
-Processed bottom-up (leaves first) so nested containment (grandparent wraps parent wraps children) resolves correctly. Parent render order is set lower than children by assigning the parent a lower `index` fractional string than its children, so children render on top. (`zIndex` does not exist on `ServerElement`; Excalidraw controls render order via the `index` field.)
+Processed bottom-up (leaves first) so nested containment (grandparent wraps parent wraps children) resolves correctly.
+
+**Render order note:** The `UpdateElementSchema` Zod validation in `server.ts` strips unknown fields, so the `index` fractional string cannot be updated via `PUT /api/elements/:id`. Setting parent render order below children (so children paint on top) is therefore not achievable without modifying `server.ts`, which is out of scope. In practice, children will be positioned correctly inside the parent box; whether the parent box renders above or below them is visual polish only and depends on the canvas paint order. This is a known limitation.
 
 ### Phase 4 — Arrow Routing
 
