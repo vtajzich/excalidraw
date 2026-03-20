@@ -864,7 +864,7 @@ export const layoutTools: Tool[] = [
   },
   {
     name: 'create_arrow',
-    description: 'Create a routed arrow between two existing elements. Automatically routes straight if the path is clear, elbow if blocked. Returns the arrow ID for use in apply_layout edges.',
+    description: 'Create a routed arrow between two existing elements. Automatically routes straight if the path is clear, elbow if blocked. Returns the arrow ID for use in apply_layout edges. Note: text content passed as "text" during element creation (via create_element or batch_create_elements) is stored and returned as "label.text" — this is expected and the text renders correctly inside the shape.',
     inputSchema: {
       type: 'object',
       properties: {
