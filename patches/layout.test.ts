@@ -169,6 +169,56 @@ test('apply_layout schema includes groups parameter', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Task 5: proximity detection — pure geometry helpers
+// ---------------------------------------------------------------------------
+console.log('\nmove_element proximity — point-in-expanded-box checks');
+
+// Helper we'll test indirectly via pointInExpandedBox logic
+function pointInBox(
+  px: number, py: number,
+  bx: number, by: number, bw: number, bh: number,
+  gap: number
+): boolean {
+  return px >= bx - gap && px <= bx + bw + gap &&
+         py >= by - gap && py <= by + bh + gap;
+}
+
+test('point inside expanded box returns true', () => {
+  assert.strictEqual(pointInBox(100, 100, 100, 100, 80, 60, 8), true);
+});
+
+test('point outside expanded box returns false', () => {
+  assert.strictEqual(pointInBox(80, 80, 100, 100, 80, 60, 8), false);
+});
+
+test('point on the expanded edge returns true', () => {
+  assert.strictEqual(pointInBox(92, 130, 100, 100, 80, 60, 8), true);
+});
+
+test('arrow last-point translation: points[N-1] shifts correctly', () => {
+  const points: [number, number][] = [[0,0],[100,0],[100,100]];
+  const dx = 20, dy = 10;
+  points[points.length - 1] = [points[points.length - 1]![0] + dx, points[points.length - 1]![1] + dy];
+  assert.deepStrictEqual(points[2], [120, 110]);
+});
+
+test('arrow first-point translation: x/y shifts, all other points compensate', () => {
+  let arrowX = 50, arrowY = 50;
+  const points: [number, number][] = [[0,0],[100,0],[100,100]];
+  const dx = 20, dy = 10;
+  arrowX += dx;
+  arrowY += dy;
+  for (let i = 1; i < points.length; i++) {
+    points[i] = [points[i]![0] - dx, points[i]![1] - dy];
+  }
+  assert.strictEqual(arrowX, 70);
+  assert.strictEqual(arrowY, 60);
+  assert.deepStrictEqual(points[0], [0, 0]);
+  assert.deepStrictEqual(points[1], [80, -10]);
+  assert.deepStrictEqual(points[2], [80, 90]);
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -638,22 +638,108 @@ export async function handleMoveElement(args: MoveElementArgs): Promise<object> 
   // Find connected arrows
   let arrowElements: CanvasElement[];
   if (args.arrowIds && args.arrowIds.length > 0) {
+    // Manual override: use all specified arrows regardless of binding status.
+    // Proximity detection does not run in this path.
     arrowElements = elements.filter(
-      e => args.arrowIds!.includes(e.id) &&
-           e.type === 'arrow' &&
-           (e.start?.id === args.id || e.end?.id === args.id)
+      e => args.arrowIds!.includes(e.id) && e.type === 'arrow'
     );
   } else {
-    arrowElements = elements.filter(
+    // Binding-based detection
+    const bindingDetected = elements.filter(
       e => e.type === 'arrow' && (e.start?.id === args.id || e.end?.id === args.id)
     );
+    const bindingIds = new Set(bindingDetected.map(e => e.id));
+
+    // Proximity-based detection: arrows whose first or last absolute point
+    // falls within the moved element's expanded bounding box (gap=8)
+    const GAP = 8;
+    const elX = el.x, elY = el.y, elW = el.width || 100, elH = el.height || 60;
+    const proximityDetected = elements.filter(e => {
+      if (e.type !== 'arrow' || !e.points?.length) return false;
+      if (bindingIds.has(e.id)) return false; // already in bindingDetected
+      const pts = e.points;
+      const firstAbs: [number, number] = [e.x + (pts[0]?.[0] ?? 0), e.y + (pts[0]?.[1] ?? 0)];
+      const lastAbs:  [number, number] = [
+        e.x + (pts[pts.length - 1]?.[0] ?? 0),
+        e.y + (pts[pts.length - 1]?.[1] ?? 0),
+      ];
+      const inBox = (px: number, py: number) =>
+        px >= elX - GAP && px <= elX + elW + GAP &&
+        py >= elY - GAP && py <= elY + elH + GAP;
+      return inBox(firstAbs[0], firstAbs[1]) || inBox(lastAbs[0], lastAbs[1]);
+    });
+
+    arrowElements = [...bindingDetected, ...proximityDetected];
   }
 
   // Reroute each affected arrow using full Phase 4 routing
   const movedElBox: Box = { x: args.x, y: args.y, width: el.width || 100, height: el.height || 60 };
   const updatedArrows: (Partial<CanvasElement> & { id: string })[] = [];
 
+  // Track which arrows need translation vs full reroute
+  const proximityArrowIds: Set<string> = new Set(
+    args.arrowIds
+      ? [] // manual arrowIds: no proximity detection
+      : arrowElements
+          .filter(e => !(e.start?.id === args.id || e.end?.id === args.id))
+          .map(e => e.id)
+  );
+
+  const dx = args.x - el.x;
+  const dy = args.y - el.y;
+
   for (const arrow of arrowElements) {
+    // Proximity-detected (no bindings): use translation
+    if (proximityArrowIds.has(arrow.id)) {
+      const pts = arrow.points;
+      if (!pts || pts.length === 0) continue;
+      const GAP = 8;
+      const elX = el.x, elY = el.y, elW = el.width || 100, elH = el.height || 60;
+      const inBox = (px: number, py: number) =>
+        px >= elX - GAP && px <= elX + elW + GAP &&
+        py >= elY - GAP && py <= elY + elH + GAP;
+
+      const firstAbs: [number, number] = [arrow.x + (pts[0]?.[0] ?? 0), arrow.y + (pts[0]?.[1] ?? 0)];
+      const lastAbs:  [number, number] = [
+        arrow.x + (pts[pts.length - 1]?.[0] ?? 0),
+        arrow.y + (pts[pts.length - 1]?.[1] ?? 0),
+      ];
+      const firstAttached = inBox(firstAbs[0], firstAbs[1]);
+      const lastAttached  = inBox(lastAbs[0],  lastAbs[1]);
+
+      const newPts: [number, number][] = pts.map(p => [p[0], p[1]]);
+      let newArrowX = arrow.x;
+      let newArrowY = arrow.y;
+
+      if (firstAttached && lastAttached) {
+        // Self-loop: translate entire arrow
+        newArrowX += dx;
+        newArrowY += dy;
+        // points unchanged
+      } else if (firstAttached) {
+        // Shift origin, compensate all other points
+        newArrowX += dx;
+        newArrowY += dy;
+        for (let i = 1; i < newPts.length; i++) {
+          newPts[i] = [newPts[i]![0] - dx, newPts[i]![1] - dy];
+        }
+        // newPts[0] stays [0,0]
+      } else if (lastAttached) {
+        // Shift only last point
+        const last = newPts[newPts.length - 1]!;
+        newPts[newPts.length - 1] = [last[0] + dx, last[1] + dy];
+      }
+
+      updatedArrows.push({
+        id: arrow.id,
+        x: newArrowX,
+        y: newArrowY,
+        points: newPts as [number, number][],
+      });
+      continue;
+    }
+
+    // Binding-detected: full reroute via routeArrow
     const otherId = arrow.start?.id === args.id ? arrow.end?.id : arrow.start?.id;
     const otherEl = otherId ? elements.find(e => e.id === otherId) : undefined;
     if (!otherEl) continue;
