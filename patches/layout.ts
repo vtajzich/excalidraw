@@ -670,7 +670,7 @@ export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> 
     .filter(e => e.id !== args.fromId && e.id !== args.toId && e.type !== 'arrow' && e.width && e.height)
     .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-  const { points, elbowed, fromPt } = routeArrow(fromBox, toBox, obstacles);
+  const { points, elbowed, fromPt, crossings, routeType, laneAxis, laneCoord } = routeArrow(fromBox, toBox, obstacles);
 
   const arrowId = generateId();
   const arrow: CanvasElement = {
@@ -702,7 +702,12 @@ export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> 
     await Promise.all(bindUpdates.map(u => putElement(u)));
   }
 
-  return { id: arrowId, element: created };
+  const routing: Record<string, unknown> = { type: routeType, crossings };
+  if (routeType === 'lane') {
+    if (laneAxis === 'x') routing.laneX = laneCoord;
+    else if (laneAxis === 'y') routing.laneY = laneCoord;
+  }
+  return { id: arrowId, element: created, routing };
 }
 
 // ---------------------------------------------------------------------------
@@ -912,6 +917,13 @@ async function handleEdgesOnly(
   const arrowUpdates: (Partial<CanvasElement> & { id: string })[] = [];
   let createdCount = 0;
 
+  const routingSummary = {
+    totalEdges: args.edges.length,
+    clean: 0,
+    withCrossings: 0,
+    edges: [] as { fromId: string; toId: string; crossings: number; type: string }[],
+  };
+
   for (const edge of args.edges) {
     const fromEl = elementMap.get(edge.fromId);
     const toEl   = elementMap.get(edge.toId);
@@ -925,7 +937,13 @@ async function handleEdgesOnly(
       .filter(e => e.id !== edge.fromId && e.id !== edge.toId && e.type !== 'arrow' && e.width && e.height)
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-    const { points, elbowed, fromPt } = routeArrow(fromBox, toBox, obstacles);
+    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromBox, toBox, obstacles);
+    if (edgeCrossings > 0) {
+      routingSummary.withCrossings++;
+      routingSummary.edges.push({ fromId: edge.fromId, toId: edge.toId, crossings: edgeCrossings, type: edgeRouteType });
+    } else {
+      routingSummary.clean++;
+    }
 
     let arrowId = edge.arrowId;
     if (!arrowId) {
@@ -971,6 +989,7 @@ async function handleEdgesOnly(
   return {
     updated: createdCount + arrowUpdates.length,
     positions: [],
+    routingSummary,
   };
 }
 
@@ -1107,6 +1126,13 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
 
   const layoutNodeIds = new Set(args.nodes.map(n => n.id));
 
+  const routingSummary = {
+    totalEdges: args.edges.length,
+    clean: 0,
+    withCrossings: 0,
+    edges: [] as { fromId: string; toId: string; crossings: number; type: string }[],
+  };
+
   for (const edge of args.edges) {
     const fromPos = posMap.get(edge.fromId);
     const toPos   = posMap.get(edge.toId);
@@ -1116,7 +1142,13 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
       .filter(e => !layoutNodeIds.has(e.id) && e.width && e.height && e.type !== 'arrow')
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-    const { points, elbowed, fromPt } = routeArrow(fromPos, toPos, obstacles);
+    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromPos, toPos, obstacles);
+    if (edgeCrossings > 0) {
+      routingSummary.withCrossings++;
+      routingSummary.edges.push({ fromId: edge.fromId, toId: edge.toId, crossings: edgeCrossings, type: edgeRouteType });
+    } else {
+      routingSummary.clean++;
+    }
 
     let arrowId = edge.arrowId;
     if (!arrowId) {
@@ -1160,6 +1192,7 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
   return {
     updated: nodeUpdates.length + arrowUpdates.length,
     positions: positions.map(p => ({ id: p.id, x: p.x, y: p.y, width: p.width, height: p.height })),
+    routingSummary,
   };
 }
 
@@ -1250,7 +1283,7 @@ export const layoutTools: Tool[] = [
   },
   {
     name: 'create_arrow',
-    description: 'Create a routed arrow between two existing elements. Automatically routes straight if the path is clear, elbow if blocked. Returns the arrow ID for use in apply_layout edges. Note: text content passed as "text" during element creation (via create_element or batch_create_elements) is stored and returned as "label.text" — this is expected and the text renders correctly inside the shape.',
+    description: 'Create a routed arrow between two existing elements. Routes automatically in three tiers: straight if the path is clear, elbow (single bend) if one turn suffices, lane if the arrow must navigate around a cluster of elements by finding the gap between columns or rows. Check routing.crossings in the response — if > 0, the route still crosses elements and you should use batch_create_elements with explicit waypoints instead. Returns the arrow ID for use in apply_layout edges. Note: text content passed as "text" during element creation (via create_element or batch_create_elements) is stored and returned as "label.text" — this is expected and the text renders correctly inside the shape.',
     inputSchema: {
       type: 'object',
       properties: {
