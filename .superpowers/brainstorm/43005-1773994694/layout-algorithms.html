@@ -1,0 +1,65 @@
+<h2>What layout style should the engine use?</h2>
+<p class="subtitle">This determines how elements are arranged when you call the layout tool</p>
+
+<div class="options">
+  <div class="option" data-choice="hierarchical" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Hierarchical (top-down / left-right)</h3>
+      <p>Parent boxes contain or sit above children. Great for org charts, system diagrams, service trees. You define parent→child relationships and the engine places everything in tidy rows/columns.</p>
+      <div style="margin-top:12px;font-family:monospace;font-size:12px;background:#1a1a2e;padding:12px;border-radius:6px;color:#a0aec0">
+        <div style="text-align:center;margin-bottom:8px">
+          <span style="border:1px solid #4a5568;padding:4px 16px;border-radius:4px;color:#90cdf4">API Gateway</span>
+        </div>
+        <div style="display:flex;justify-content:center;gap:8px;margin-bottom:8px">
+          <span style="border:1px solid #4a5568;padding:4px 8px;border-radius:4px;color:#68d391">Service A</span>
+          <span style="border:1px solid #4a5568;padding:4px 8px;border-radius:4px;color:#68d391">Service B</span>
+          <span style="border:1px solid #4a5568;padding:4px 8px;border-radius:4px;color:#68d391">Service C</span>
+        </div>
+        <div style="display:flex;justify-content:center;gap:8px">
+          <span style="border:1px solid #4a5568;padding:4px 8px;border-radius:4px;color:#f6ad55">DB</span>
+          <span style="border:1px solid #4a5568;padding:4px 8px;border-radius:4px;color:#f6ad55">Cache</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="flow" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Flow / Directed graph</h3>
+      <p>Elements are arranged by the direction arrows flow. Best for pipelines, data flows, process diagrams. The engine follows arrow direction to decide left→right or top→bottom ordering.</p>
+      <div style="margin-top:12px;font-family:monospace;font-size:12px;background:#1a1a2e;padding:12px;border-radius:6px;color:#a0aec0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="border:1px solid #4a5568;padding:4px 8px;border-radius:4px;color:#90cdf4">Input</span>
+          <span>→</span>
+          <span style="border:1px solid #4a5568;padding:4px 8px;border-radius:4px;color:#90cdf4">Parse</span>
+          <span>→</span>
+          <span style="border:1px solid #4a5568;padding:4px 8px;border-radius:4px;color:#90cdf4">Transform</span>
+          <span>→</span>
+          <span style="border:1px solid #4a5568;padding:4px 8px;border-radius:4px;color:#68d391">Output</span>
+        </div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:6px;padding-left:80px">
+          <span>↓</span>
+          <span style="border:1px solid #4a5568;padding:4px 8px;border-radius:4px;color:#f6ad55">Error handler</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="both" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Both — metadata-driven</h3>
+      <p>The layout style is passed as metadata with each call. You can run hierarchical on one group and flow on another. The engine picks the algorithm based on what you tell it.</p>
+      <div style="margin-top:12px;font-family:monospace;font-size:12px;background:#1a1a2e;padding:12px;border-radius:6px;color:#a0aec0">
+        <div style="color:#68d391">apply_layout({</div>
+        <div style="padding-left:16px;color:#a0aec0">algorithm: <span style="color:#f6ad55">"hierarchical"</span> | <span style="color:#f6ad55">"flow"</span>,</div>
+        <div style="padding-left:16px;color:#a0aec0">direction: <span style="color:#f6ad55">"top-down"</span> | <span style="color:#f6ad55">"left-right"</span>,</div>
+        <div style="padding-left:16px;color:#a0aec0">nodes: [...],</div>
+        <div style="padding-left:16px;color:#a0aec0">edges: [...]</div>
+        <div style="color:#68d391">})</div>
+      </div>
+    </div>
+  </div>
+</div>

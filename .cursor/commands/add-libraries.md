@@ -8,24 +8,11 @@ Libraries are `.excalidrawlib` files served as static assets. On startup, `App.t
 
 1. **Download libraries** — run the [download-libraries](./download-libraries.md) command to populate `library_cache/`.
 
-2. **Copy into the cloned repo**:
+2. **Register and rebuild**:
    ```bash
-   cp library_cache/*.excalidrawlib mcp_excalidraw/frontend/public/libraries/
+   bash scripts/register_libraries.sh
    ```
-
-3. **Register each file** in `mcp_excalidraw/frontend/src/App.tsx` — add its path to the `LIBRARY_FILES` array (around line 355):
-   ```typescript
-   const LIBRARY_FILES = [
-     // ... existing entries ...
-     '/libraries/<new-library>.excalidrawlib',
-   ]
-   ```
-
-4. **Rebuild and restart**:
-   ```bash
-   cd mcp_excalidraw && npm run build
-   ```
-   Then restart the MCP server.
+   This copies all `.excalidrawlib` files from `library_cache/` into `mcp_excalidraw/frontend/public/libraries/`, registers any new ones in the `LIBRARY_FILES` array in `App.tsx`, and rebuilds the frontend. Safe to re-run.
 
 ## Currently installed libraries
 
@@ -77,3 +64,4 @@ Source repo: <https://github.com/excalidraw/excalidraw-libraries/tree/main/libra
 - **Library cache**: `library_cache/`
 - **Static assets**: `mcp_excalidraw/frontend/public/libraries/`
 - **Loading logic**: `mcp_excalidraw/frontend/src/App.tsx` — `LIBRARY_FILES` array + `loadLibraries()` function
+- **Registration script**: `scripts/register_libraries.sh` + `patches/patch-app-libraries.mjs`

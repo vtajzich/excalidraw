@@ -1,0 +1,76 @@
+<h2>Architecture Overview</h2>
+<p class="subtitle">Three new tools, one new module — all delivered as a patch</p>
+
+<div class="mockup">
+  <div class="mockup-header">System Design</div>
+  <div class="mockup-body" style="padding:24px;font-family:monospace;font-size:12px">
+
+    <div style="display:flex;gap:12px;margin-bottom:20px">
+      <div style="flex:1;border:1px solid #4299e1;border-radius:6px;padding:12px;background:#0d1b2e">
+        <div style="color:#90cdf4;font-weight:600;margin-bottom:8px">AI Agent (MCP Client)</div>
+        <div style="color:#718096;font-size:11px">calls tools with metadata</div>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
+          <code style="color:#68d391;font-size:10px">apply_layout({ algorithm, direction, nodes, edges, spacing })</code>
+          <code style="color:#68d391;font-size:10px">move_element({ id, x, y, arrows? })</code>
+          <code style="color:#68d391;font-size:10px">create_arrow({ fromId, toId, label?, style? })</code>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#4a5568;margin-bottom:12px">↓ MCP stdio ↓</div>
+
+    <div style="border:1px solid #553c9a;border-radius:6px;padding:12px;background:#1a0d2e;margin-bottom:12px">
+      <div style="color:#b794f4;font-weight:600;margin-bottom:10px">MCP Server — src/index.ts (patched)</div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1;border:1px solid #44337a;border-radius:4px;padding:8px">
+          <div style="color:#d6bcfa;font-size:11px;margin-bottom:4px">apply_layout handler</div>
+          <div style="color:#718096;font-size:10px">1. fetch elements by IDs<br>2. call layout engine<br>3. batch update positions</div>
+        </div>
+        <div style="flex:1;border:1px solid #44337a;border-radius:4px;padding:8px">
+          <div style="color:#d6bcfa;font-size:11px;margin-bottom:4px">move_element handler</div>
+          <div style="color:#718096;font-size:10px">1. update element x/y<br>2. recalculate arrows<br>3. push updates</div>
+        </div>
+        <div style="flex:1;border:1px solid #44337a;border-radius:4px;padding:8px">
+          <div style="color:#d6bcfa;font-size:11px;margin-bottom:4px">create_arrow handler</div>
+          <div style="color:#718096;font-size:10px">1. resolve from/to IDs<br>2. create arrow element<br>3. set bindings</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#4a5568;margin-bottom:12px">↓ calls ↓</div>
+
+    <div style="display:flex;gap:12px;margin-bottom:12px">
+      <div style="flex:2;border:1px solid #276749;border-radius:6px;padding:12px;background:#0d2e1a">
+        <div style="color:#68d391;font-weight:600;margin-bottom:8px">src/layout.ts (new patch file)</div>
+        <div style="display:flex;gap:8px">
+          <div style="flex:1;border:1px solid #1c4532;border-radius:4px;padding:8px">
+            <div style="color:#9ae6b4;font-size:11px;margin-bottom:4px">Dagre adapter</div>
+            <div style="color:#718096;font-size:10px">converts elements→graph<br>runs layout<br>returns positions</div>
+          </div>
+          <div style="flex:1;border:1px solid #1c4532;border-radius:4px;padding:8px">
+            <div style="color:#9ae6b4;font-size:11px;margin-bottom:4px">Containment resolver</div>
+            <div style="color:#718096;font-size:10px">sizes parent boxes<br>adds padding<br>offsets children</div>
+          </div>
+          <div style="flex:1;border:1px solid #1c4532;border-radius:4px;padding:8px">
+            <div style="color:#9ae6b4;font-size:11px;margin-bottom:4px">Arrow router</div>
+            <div style="color:#718096;font-size:10px">straight if clear<br>elbow if blocked<br>updates points[]</div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:1;border:1px solid #744210;border-radius:6px;padding:12px;background:#2d1a00">
+        <div style="color:#f6ad55;font-weight:600;margin-bottom:8px">dagre (npm dep)</div>
+        <div style="color:#718096;font-size:10px">~50kb<br>Sugiyama layout<br>hierarchical + DAG<br>node positioning<br>layer assignment</div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#4a5568;margin-bottom:12px">↓ HTTP ↓</div>
+
+    <div style="border:1px solid #2d3748;border-radius:6px;padding:12px;background:#171923">
+      <div style="color:#a0aec0;font-weight:600">Express server (src/server.ts) — unchanged</div>
+      <div style="color:#718096;font-size:10px;margin-top:4px">in-memory element store · WebSocket broadcast · arrow binding resolution</div>
+    </div>
+
+  </div>
+</div>
+
+<p style="color:#68d391;margin-top:16px">Does this architecture look right? Reply in the terminal.</p>

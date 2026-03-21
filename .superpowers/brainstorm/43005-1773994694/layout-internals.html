@@ -1,0 +1,89 @@
+<h2>Layout Engine Internals</h2>
+<p class="subtitle">How apply_layout processes a call — 4 phases in sequence</p>
+
+<div class="mockup">
+  <div class="mockup-header">Processing Pipeline — src/layout.ts</div>
+  <div class="mockup-body" style="padding:20px;font-size:12px">
+
+    <!-- Phase 1 -->
+    <div style="display:flex;gap:12px;margin-bottom:12px;align-items:flex-start">
+      <div style="min-width:28px;height:28px;border-radius:50%;background:#2b4c7e;color:#90cdf4;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0">1</div>
+      <div style="flex:1;border:1px solid #2b4c7e;border-radius:6px;padding:12px;background:#0d1420">
+        <div style="color:#90cdf4;font-weight:600;margin-bottom:6px">Fetch & validate elements</div>
+        <div style="color:#718096;line-height:1.6">
+          Fetch all canvas elements (or subset from <code>elementIds</code>). Cross-reference with <code>nodes[]</code> metadata — fill in missing widths/heights from actual element dimensions. Validate that all <code>parentId</code> references exist in the set.
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#4a5568;margin-bottom:12px">↓</div>
+
+    <!-- Phase 2 -->
+    <div style="display:flex;gap:12px;margin-bottom:12px;align-items:flex-start">
+      <div style="min-width:28px;height:28px;border-radius:50%;background:#276749;color:#68d391;display:flex;align-items:center;justify-content:normal;font-weight:700;flex-shrink:0;padding-left:9px">2</div>
+      <div style="flex:1;border:1px solid #276749;border-radius:6px;padding:12px;background:#0d2e1a">
+        <div style="color:#68d391;font-weight:600;margin-bottom:6px">Dagre layout (per containment group)</div>
+        <div style="color:#718096;line-height:1.6;margin-bottom:8px">
+          Build a Dagre graph from <code>nodes[]</code> and <code>edges[]</code>. Nodes with a <code>parentId</code> are processed as sub-graphs — Dagre runs on each group independently, then groups are positioned relative to their parent.
+        </div>
+        <div style="display:flex;gap:8px">
+          <div style="flex:1;background:#071a0d;border:1px solid #1c4532;border-radius:4px;padding:8px">
+            <div style="color:#9ae6b4;font-size:11px;margin-bottom:4px">Hierarchical mode</div>
+            <div style="color:#718096;font-size:10px">rankdir: TB or LR<br>Sugiyama layering<br>crossing minimisation<br>node ordering per rank</div>
+          </div>
+          <div style="flex:1;background:#071a0d;border:1px solid #1c4532;border-radius:4px;padding:8px">
+            <div style="color:#9ae6b4;font-size:11px;margin-bottom:4px">Flow mode</div>
+            <div style="color:#718096;font-size:10px">same algorithm<br>edges drive direction<br>sources placed first<br>sinks placed last</div>
+          </div>
+        </div>
+        <div style="margin-top:8px;color:#718096;font-size:10px">Output: <code style="color:#9ae6b4">{ id, x, y }</code> for every node (absolute coordinates)</div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#4a5568;margin-bottom:12px">↓</div>
+
+    <!-- Phase 3 -->
+    <div style="display:flex;gap:12px;margin-bottom:12px;align-items:flex-start">
+      <div style="min-width:28px;height:28px;border-radius:50%;background:#744210;color:#f6ad55;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0">3</div>
+      <div style="flex:1;border:1px solid #744210;border-radius:6px;padding:12px;background:#1a0d00">
+        <div style="color:#f6ad55;font-weight:600;margin-bottom:6px">Containment resolver (bottom-up)</div>
+        <div style="color:#718096;line-height:1.6;margin-bottom:8px">
+          Walks the parent-child tree leaves-first. For each parent: computes bounding box of all positioned children, adds <code>padding</code> on all sides, sets parent <code>width/height</code> to fit. Children's absolute positions are then offset to sit inside the parent box.
+        </div>
+        <div style="background:#0d0800;border:1px solid #4a2800;border-radius:4px;padding:8px;font-family:monospace;font-size:10px">
+          <div style="color:#f6ad55">parent.x = minChildX - padding</div>
+          <div style="color:#f6ad55">parent.y = minChildY - padding</div>
+          <div style="color:#f6ad55">parent.width  = (maxChildX - minChildX) + 2*padding</div>
+          <div style="color:#f6ad55">parent.height = (maxChildY - minChildY) + 2*padding</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#4a5568;margin-bottom:12px">↓</div>
+
+    <!-- Phase 4 -->
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <div style="min-width:28px;height:28px;border-radius:50%;background:#553c9a;color:#b794f4;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0">4</div>
+      <div style="flex:1;border:1px solid #553c9a;border-radius:6px;padding:12px;background:#1a0d2e">
+        <div style="color:#b794f4;font-weight:600;margin-bottom:6px">Arrow routing</div>
+        <div style="color:#718096;line-height:1.6;margin-bottom:8px">
+          For each edge in <code>edges[]</code>: compute the nearest edge midpoints on source and target elements. Cast a ray between them — if it intersects no other element bounding box, use a straight 2-point line. If blocked, route as an elbow: go horizontally to midpoint X, then vertically to target Y (or vice versa, picking whichever path has fewer intersections).
+        </div>
+        <div style="display:flex;gap:8px">
+          <div style="flex:1;background:#0d0720;border:1px solid #322659;border-radius:4px;padding:8px">
+            <div style="color:#d6bcfa;font-size:11px;margin-bottom:4px">Straight path</div>
+            <div style="color:#718096;font-size:10px">points: [[0,0], [dx,dy]]<br>gap: 8px from edge<br>updates startBinding<br>+ endBinding</div>
+          </div>
+          <div style="flex:1;background:#0d0720;border:1px solid #322659;border-radius:4px;padding:8px">
+            <div style="color:#d6bcfa;font-size:11px;margin-bottom:4px">Elbow fallback</div>
+            <div style="color:#718096;font-size:10px">points: 3-4 waypoints<br>exits source from nearest clear side<br>enters target perpendicularly<br>elbowed: true</div>
+          </div>
+        </div>
+        <div style="margin-top:8px;color:#718096;font-size:10px">Finally: batch-update all changed elements via Express API in one call</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<p style="color:#a0aec0;margin-top:16px">Does this pipeline make sense? Reply in the terminal.</p>

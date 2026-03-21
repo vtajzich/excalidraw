@@ -11,24 +11,17 @@ echo "==> [2/5] Download icon libraries"
 bash scripts/download_libraries.sh
 
 echo ""
-echo "==> [3/5] Copy libraries into build"
-mkdir -p mcp_excalidraw/frontend/public/libraries
-cp library_cache/*.excalidrawlib mcp_excalidraw/frontend/public/libraries/
-echo "    Copied $(ls library_cache/*.excalidrawlib | wc -l | tr -d ' ') libraries"
-
-echo ""
-echo "==> [4/5] Patch MCP server with list_libraries / list_library_items tools"
+echo "==> [3/5] Patch MCP server with list_libraries / list_library_items tools"
 bash scripts/add_library_tools.sh
 
 echo ""
-echo "==> [5/5] Patch MCP server with layout tools (apply_layout, move_element, create_arrow)"
+echo "==> [4/5] Patch MCP server with layout tools (apply_layout, move_element, create_arrow)"
 bash scripts/add_layout_tools.sh
 
 echo ""
-echo "==> Done."
+echo "==> [5/5] Register libraries in App.tsx and rebuild frontend"
+bash scripts/register_libraries.sh
+
 echo ""
-echo "    Remaining step: register the copied libraries in App.tsx and rebuild."
-echo "    Run the /add-libraries command (Claude Code) or add-libraries (Cursor)."
-echo ""
-echo "    Then start the canvas:"
+echo "==> Done. Start the canvas server:"
 echo "    bash scripts/run_canvas.sh"

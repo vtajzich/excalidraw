@@ -6,21 +6,25 @@ Run full setup for the Excalidraw MCP workspace from scratch.
 
 ## Steps
 
-1. **Clone, build, download libraries, and patch MCP tools**:
-   ```bash
-   bash scripts/init_full.sh
-   ```
-   This runs four steps in sequence:
-   - Clones `mcp_excalidraw` and builds it
-   - Downloads all `.excalidrawlib` icon packs into `library_cache/`
-   - Copies them into `mcp_excalidraw/frontend/public/libraries/`
-   - Patches the MCP server with `list_libraries` and `list_library_items` tools
+Run the setup script:
+```bash
+bash scripts/init_full.sh
+```
 
-2. **Register libraries in App.tsx** — follow the `add-libraries` command to add each library file to the `LIBRARY_FILES` array in `mcp_excalidraw/frontend/src/App.tsx` and rebuild.
+This runs five steps in sequence:
 
-3. **Start the canvas server**:
-   ```bash
-   bash scripts/run_canvas.sh
-   ```
+1. **Clone and build** `mcp_excalidraw`
+2. **Download** all `.excalidrawlib` icon packs into `library_cache/`
+3. **Patch MCP** with `list_libraries` and `list_library_items` tools
+4. **Patch MCP** with `apply_layout`, `move_element`, and `create_arrow` tools
+5. **Register libraries** in `App.tsx` and rebuild the frontend
+
+All steps are idempotent — safe to re-run on an already-configured workspace.
+
+## Start the canvas server
+
+```bash
+bash scripts/run_canvas.sh
+```
 
 Open <http://localhost:3000>.

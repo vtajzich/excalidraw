@@ -1,0 +1,75 @@
+<h2>Tool API Design</h2>
+<p class="subtitle">Three new MCP tools — review each and flag anything that looks off</p>
+
+<div class="section">
+  <h3 style="color:#68d391">1. apply_layout</h3>
+  <div style="background:#0d1b0d;border:1px solid #276749;border-radius:6px;padding:16px;font-family:monospace;font-size:12px;line-height:1.8">
+    <div style="color:#68d391">apply_layout({</div>
+    <div style="padding-left:20px">
+      <div><span style="color:#90cdf4">algorithm</span>: <span style="color:#f6ad55">"hierarchical"</span> | <span style="color:#f6ad55">"flow"</span>,  <span style="color:#4a5568">// required</span></div>
+      <div><span style="color:#90cdf4">direction</span>: <span style="color:#f6ad55">"top-down"</span> | <span style="color:#f6ad55">"left-right"</span>,  <span style="color:#4a5568">// default: top-down</span></div>
+      <div><span style="color:#90cdf4">elementIds</span>: <span style="color:#a0aec0">string[]</span>,  <span style="color:#4a5568">// optional — omit to layout all</span></div>
+      <div style="margin-top:8px"><span style="color:#90cdf4">nodes</span>: [{  <span style="color:#4a5568">// metadata for each node</span></div>
+      <div style="padding-left:20px">
+        <div><span style="color:#90cdf4">id</span>: <span style="color:#a0aec0">string</span>,  <span style="color:#4a5568">// element ID on canvas</span></div>
+        <div><span style="color:#90cdf4">parentId</span>?: <span style="color:#a0aec0">string</span>,  <span style="color:#4a5568">// for containment — parent expands to hold this</span></div>
+        <div><span style="color:#90cdf4">width</span>?: <span style="color:#a0aec0">number</span>,  <span style="color:#4a5568">// hint — falls back to actual element width</span></div>
+        <div><span style="color:#90cdf4">height</span>?: <span style="color:#a0aec0">number</span></div>
+      </div>
+      <div>}],</div>
+      <div style="margin-top:8px"><span style="color:#90cdf4">edges</span>: [{  <span style="color:#4a5568">// arrows to route after layout</span></div>
+      <div style="padding-left:20px">
+        <div><span style="color:#90cdf4">fromId</span>: <span style="color:#a0aec0">string</span>,</div>
+        <div><span style="color:#90cdf4">toId</span>: <span style="color:#a0aec0">string</span>,</div>
+        <div><span style="color:#90cdf4">arrowId</span>?: <span style="color:#a0aec0">string</span>  <span style="color:#4a5568">// existing arrow to update, or creates new one</span></div>
+      </div>
+      <div>}],</div>
+      <div style="margin-top:8px"><span style="color:#90cdf4">spacing</span>?: {  <span style="color:#4a5568">// all optional, have sensible defaults</span></div>
+      <div style="padding-left:20px">
+        <div><span style="color:#90cdf4">nodeSep</span>?: <span style="color:#a0aec0">number</span>,  <span style="color:#4a5568">// px between sibling nodes (default 40)</span></div>
+        <div><span style="color:#90cdf4">rankSep</span>?: <span style="color:#a0aec0">number</span>,  <span style="color:#4a5568">// px between layers/ranks (default 60)</span></div>
+        <div><span style="color:#90cdf4">padding</span>?: <span style="color:#a0aec0">number</span>   <span style="color:#4a5568">// px inside parent boxes (default 20)</span></div>
+      </div>
+      <div>}</div>
+    </div>
+    <div style="color:#68d391">})</div>
+    <div style="margin-top:8px;color:#4a5568">// returns: { updated: number, positions: {id, x, y, width, height}[] }</div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:20px">
+  <h3 style="color:#90cdf4">2. move_element</h3>
+  <div style="background:#0d1420;border:1px solid #2b4c7e;border-radius:6px;padding:16px;font-family:monospace;font-size:12px;line-height:1.8">
+    <div style="color:#90cdf4">move_element({</div>
+    <div style="padding-left:20px">
+      <div><span style="color:#68d391">id</span>: <span style="color:#a0aec0">string</span>,  <span style="color:#4a5568">// element to move</span></div>
+      <div><span style="color:#68d391">x</span>: <span style="color:#a0aec0">number</span>,</div>
+      <div><span style="color:#68d391">y</span>: <span style="color:#a0aec0">number</span>,</div>
+      <div style="margin-top:8px"><span style="color:#68d391">arrowIds</span>?: <span style="color:#a0aec0">string[]</span>  <span style="color:#4a5568">// override: only reroute these arrows</span></div>
+      <div><span style="color:#4a5568">                  // omit = auto-detect all connected arrows</span></div>
+    </div>
+    <div style="color:#90cdf4">})</div>
+    <div style="margin-top:8px;color:#4a5568">// returns: { element: updated element, arrows: updated arrow[] }</div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:20px">
+  <h3 style="color:#f6ad55">3. create_arrow</h3>
+  <div style="background:#1a1200;border:1px solid #744210;border-radius:6px;padding:16px;font-family:monospace;font-size:12px;line-height:1.8">
+    <div style="color:#f6ad55">create_arrow({</div>
+    <div style="padding-left:20px">
+      <div><span style="color:#68d391">fromId</span>: <span style="color:#a0aec0">string</span>,  <span style="color:#4a5568">// source element</span></div>
+      <div><span style="color:#68d391">toId</span>: <span style="color:#a0aec0">string</span>,    <span style="color:#4a5568">// target element</span></div>
+      <div style="margin-top:8px"><span style="color:#68d391">label</span>?: <span style="color:#a0aec0">string</span>,  <span style="color:#4a5568">// text on the arrow</span></div>
+      <div><span style="color:#68d391">style</span>?: <span style="color:#f6ad55">"solid"</span> | <span style="color:#f6ad55">"dashed"</span> | <span style="color:#f6ad55">"dotted"</span>,  <span style="color:#4a5568">// default: solid</span></div>
+      <div><span style="color:#68d391">startArrowhead</span>?: <span style="color:#f6ad55">"arrow"</span> | <span style="color:#f6ad55">"dot"</span> | <span style="color:#f6ad55">"bar"</span> | <span style="color:#f6ad55">null</span>,</div>
+      <div><span style="color:#68d391">endArrowhead</span>?: <span style="color:#f6ad55">"arrow"</span> | <span style="color:#f6ad55">"dot"</span> | <span style="color:#f6ad55">"bar"</span> | <span style="color:#f6ad55">null</span>,  <span style="color:#4a5568">// default: arrow</span></div>
+      <div><span style="color:#68d391">color</span>?: <span style="color:#a0aec0">string</span>   <span style="color:#4a5568">// stroke color</span></div>
+    </div>
+    <div style="color:#f6ad55">})</div>
+    <div style="margin-top:8px;color:#4a5568">// returns: { id: string, element: created arrow element }</div>
+    <div style="color:#4a5568">// routing: straight if path is clear, elbow if blocked</div>
+  </div>
+</div>
+
+<p style="color:#a0aec0;margin-top:16px">Do these APIs look right? Any parameters missing or wrong? Reply in the terminal.</p>
