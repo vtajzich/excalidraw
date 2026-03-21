@@ -335,6 +335,43 @@ test('Phase 1 return has crossings:0 and routeType:straight with no laneAxis', (
 });
 
 // ---------------------------------------------------------------------------
+// Integration test: route init-b → svc-c through example diagram
+// ---------------------------------------------------------------------------
+console.log('\nrouteArrow — integration test with example diagram');
+
+test('init-b → svc-c routes via lane with 0 crossings', () => {
+  const filePath = path.join(
+    new URL('.', import.meta.url).pathname,
+    '../docs/example-diagram/example-diagram.excalidraw'
+  );
+  const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  const elements: Array<{ id: string; type: string; x: number; y: number; width?: number; height?: number }> = data.elements;
+
+  const initBEl = elements.find(e => e.id === 'init-b');
+  const svcCEl  = elements.find(e => e.id === 'svc-c');
+  assert.ok(initBEl, 'init-b element must exist in example diagram');
+  assert.ok(svcCEl,  'svc-c element must exist in example diagram');
+
+  const initBBox = { x: initBEl!.x, y: initBEl!.y, width: initBEl!.width!, height: initBEl!.height! };
+  const svcCBox  = { x: svcCEl!.x,  y: svcCEl!.y,  width: svcCEl!.width!,  height: svcCEl!.height!  };
+
+  const obstacles = elements
+    .filter(e => e.id !== 'init-b' && e.id !== 'svc-c' && e.type !== 'arrow' && e.width && e.height)
+    .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
+
+  const result = routeArrow(initBBox, svcCBox, obstacles);
+
+  // Phase 2 may already find a 0-crossing elbow (skipping Phase 3 lane routing).
+  // Either 'lane' or 'elbow' is acceptable as long as crossings === 0.
+  assert.strictEqual(result.crossings, 0,
+    `expected 0 crossings, got ${result.crossings} (routeType: ${result.routeType})`);
+  assert.ok(
+    result.routeType === 'lane' || result.routeType === 'elbow',
+    `expected routeType 'lane' or 'elbow', got '${result.routeType}'`
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);
