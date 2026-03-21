@@ -676,13 +676,13 @@ export async function handleMoveElement(args: MoveElementArgs): Promise<object> 
   const movedElBox: Box = { x: args.x, y: args.y, width: el.width || 100, height: el.height || 60 };
   const updatedArrows: (Partial<CanvasElement> & { id: string })[] = [];
 
-  // Track which arrows need translation vs full reroute
+  // Track which arrows need translation vs full reroute.
+  // Any arrow (manual or auto-detected) that lacks binding to the moved element
+  // uses translation instead of routeArrow — routeArrow requires known from/to IDs.
   const proximityArrowIds: Set<string> = new Set(
-    args.arrowIds
-      ? [] // manual arrowIds: no proximity detection
-      : arrowElements
-          .filter(e => !(e.start?.id === args.id || e.end?.id === args.id))
-          .map(e => e.id)
+    arrowElements
+      .filter(e => !(e.start?.id === args.id || e.end?.id === args.id))
+      .map(e => e.id)
   );
 
   const dx = args.x - el.x;
