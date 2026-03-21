@@ -145,7 +145,7 @@ export function routeArrow(
   from: Box,
   to: Box,
   obstacles: Box[]
-): { points: Point[]; elbowed: boolean; fromPt: Point } {
+): { points: Point[]; elbowed: boolean; fromPt: Point; crossings: number; routeType: 'straight' | 'elbow' | 'lane'; laneAxis?: 'x' | 'y'; laneCoord?: number } {
   const SIDES: (keyof SideMidpoints)[] = ['top', 'right', 'bottom', 'left'];
   const fromPts = getSideMidpoints(from);
   const toPts   = getSideMidpoints(to);
@@ -170,6 +170,8 @@ export function routeArrow(
       points: [[0, 0], [toPt[0] - fromPt[0], toPt[1] - fromPt[1]]],
       elbowed: false,
       fromPt,
+      crossings: 0,
+      routeType: 'straight',
     };
   }
 
@@ -219,14 +221,21 @@ export function routeArrow(
       points: [[0, 0], [tp[0] - fp[0], tp[1] - fp[1]]],
       elbowed: false,
       fromPt: fp,
+      crossings: 0,
+      routeType: 'elbow',
     };
   }
 
+  const phase2CrossingCount = best.count;
   const origin = best.fromPt;
+  // Phase 3: lane routing — only when Phase 2 still has crossings
+  // (Phase 3 code goes here in Task 2)
   return {
     points: best.waypoints.map(p => [p[0] - origin[0], p[1] - origin[1]] as Point),
     elbowed: true,
     fromPt: origin,
+    crossings: best.count,
+    routeType: 'elbow',
   };
 }
 
