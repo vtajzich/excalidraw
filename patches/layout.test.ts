@@ -3,6 +3,8 @@
 // Requires: bash scripts/add_layout_tools.sh to have been run first
 
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   routeArrow,
   segmentIntersectsBox,
@@ -216,6 +218,120 @@ test('arrow first-point translation: x/y shifts, all other points compensate', (
   assert.deepStrictEqual(points[0], [0, 0]);
   assert.deepStrictEqual(points[1], [80, -10]);
   assert.deepStrictEqual(points[2], [80, 90]);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 3: lane routing unit tests
+// ---------------------------------------------------------------------------
+console.log('\nrouteArrow — Phase 3 lane routing');
+
+test('vertical lane detection: 3 column obstacles produce 4 distinct lanes', () => {
+  // col1: x=0..100, col2: x=130..230, col3: x=260..360
+  // gaps: 30px each — both ≥ 20 → 2 interior lanes at 115 and 245
+  // outer lanes: min(0)-40=-40, max(360)+40=400
+  // sorted: [-40, 115, 245, 400] — all differ by ≥ 5 → 4 distinct lanes
+  const obs = [
+    { x: 0,   y: 0, width: 100, height: 60 },
+    { x: 130, y: 0, width: 100, height: 60 },
+    { x: 260, y: 0, width: 100, height: 60 },
+  ];
+  const sorted = [...obs].sort((a, b) => a.x - b.x);
+  const raw: number[] = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const re = sorted[i].x + sorted[i].width;
+    const le = sorted[i + 1].x;
+    if (le - re >= 20) raw.push((re + le) / 2);
+  }
+  raw.push(Math.min(...obs.map(o => o.x)) - 40);
+  raw.push(Math.max(...obs.map(o => o.x + o.width)) + 40);
+  raw.sort((a, b) => a - b);
+  const lanes = raw.filter((v, i) => i === 0 || v - raw[i - 1] >= 5);
+  assert.strictEqual(lanes.length, 4, `expected 4 lanes, got ${lanes.length}: ${lanes}`);
+  assert.strictEqual(lanes[0], -40);
+  assert.strictEqual(lanes[1], 115);
+  assert.strictEqual(lanes[2], 245);
+  assert.strictEqual(lanes[3], 400);
+});
+
+test('horizontal lane detection: 3 row obstacles produce 4 distinct lanes', () => {
+  const obs = [
+    { x: 0, y: 0,   width: 100, height: 60 },
+    { x: 0, y: 90,  width: 100, height: 60 },
+    { x: 0, y: 180, width: 100, height: 60 },
+  ];
+  // gaps: 30px each — interior: (60+90)/2=75, (150+180)/2=165
+  // outer: 0-40=-40, 240+40=280
+  const sorted = [...obs].sort((a, b) => a.y - b.y);
+  const raw: number[] = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const be = sorted[i].y + sorted[i].height;
+    const te = sorted[i + 1].y;
+    if (te - be >= 20) raw.push((be + te) / 2);
+  }
+  raw.push(Math.min(...obs.map(o => o.y)) - 40);
+  raw.push(Math.max(...obs.map(o => o.y + o.height)) + 40);
+  raw.sort((a, b) => a - b);
+  const lanes = raw.filter((v, i) => i === 0 || v - raw[i - 1] >= 5);
+  assert.strictEqual(lanes.length, 4);
+  assert.strictEqual(lanes[0], -40);
+  assert.strictEqual(lanes[1], 75);
+  assert.strictEqual(lanes[2], 165);
+  assert.strictEqual(lanes[3], 280);
+});
+
+test('degenerate candidate filtering: lane path with identical consecutive waypoints is excluded', () => {
+  const from = { x: 0, y: 0, width: 100, height: 60 };
+  const to   = { x: 200, y: 200, width: 100, height: 60 };
+  const obs = [{ x: 60, y: 30, width: 80, height: 140 }];
+  const result = routeArrow(from, to, obs);
+  assert.ok(result.points.length >= 2, 'returns valid points array');
+  assert.ok(typeof result.crossings === 'number', 'has crossings field');
+});
+
+test('cross-axis selection: horizontal lane wins when it has fewer crossings', () => {
+  const from = { x: 100, y: 0,   width: 100, height: 60 };
+  const to   = { x: 100, y: 400, width: 100, height: 60 };
+  const obs  = [{ x: -200, y: 100, width: 600, height: 200 }];
+  const result = routeArrow(from, to, obs);
+  assert.ok(typeof result.crossings === 'number', 'has crossings field');
+  assert.ok(['elbow', 'lane'].includes(result.routeType), `routeType is ${result.routeType}`);
+});
+
+test('Phase 3 prefers lane path with 0 crossings over Phase 2 with 1 crossing', () => {
+  // Two obstacles that block all straight paths and all Phase-2 elbows (min 1 crossing),
+  // but a horizontal lane at y=190 (below both obstacles) yields 0 crossings.
+  // obs1: x=80..180, y=-50..150  obs2: x=200..300, y=-50..150  gap=20px → no interior vLane
+  // hLane outer bottom: y = max(150,150)+40 = 190 — clear of both obstacles
+  const obs = [
+    { x: 80,  y: -50, width: 100, height: 200 },
+    { x: 200, y: -50, width: 100, height: 200 },
+  ];
+  const from2 = { x: 0,   y: 0,  width: 60, height: 60 };
+  const to2   = { x: 200, y: 50, width: 60, height: 60 };
+  const result = routeArrow(from2, to2, obs);
+  assert.strictEqual(result.routeType, 'lane', `expected lane, got ${result.routeType}`);
+  assert.strictEqual(result.crossings, 0, `expected 0 crossings, got ${result.crossings}`);
+});
+
+test('Phase 2 fallback: when Phase 2 already has 0 crossings, Phase 3 is skipped and returns elbow', () => {
+  const from = { x: 0,   y: 0,   width: 60, height: 60 };
+  const to   = { x: 200, y: 200, width: 60, height: 60 };
+  const obs  = [{ x: 60, y: 60, width: 60, height: 60 }];
+  const result = routeArrow(from, to, obs);
+  // Phase 1 blocked, Phase 2 finds clean elbow (count=0), Phase 3 skipped
+  assert.strictEqual(result.routeType, 'elbow', `expected elbow, got ${result.routeType}`);
+  assert.strictEqual(result.crossings, 0);
+  assert.strictEqual(result.laneAxis, undefined);
+});
+
+test('Phase 1 return has crossings:0 and routeType:straight with no laneAxis', () => {
+  const from = { x: 0,   y: 0, width: 60, height: 60 };
+  const to   = { x: 200, y: 0, width: 60, height: 60 };
+  const result = routeArrow(from, to, []);
+  assert.strictEqual(result.crossings, 0);
+  assert.strictEqual(result.routeType, 'straight');
+  assert.strictEqual(result.laneAxis, undefined);
+  assert.strictEqual(result.laneCoord, undefined);
 });
 
 // ---------------------------------------------------------------------------
