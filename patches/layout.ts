@@ -474,7 +474,7 @@ export function applyGroupsYSnap(
   const posHeightMap = new Map(positions.map(p => [p.id, p.height]));
   const nodeHeightMap = new Map(nodes.map(n => [n.id, n.resolvedHeight]));
   function getHeight(id: string): number {
-    return posHeightMap.get(id) ?? nodeHeightMap.get(id) ?? 60;
+    return nodeHeightMap.get(id) ?? posHeightMap.get(id) ?? 60;
   }
 
   // Compute max height per rank (across all grouped nodes at that rank)
@@ -860,6 +860,9 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
     for (const group of args.groups) {
       if (!Number.isInteger(group.rank) || group.rank < 0) {
         throw new Error(`groups: rank must be a non-negative integer (got ${group.rank} in group "${group.id}")`);
+      }
+      if (group.memberIds.length === 0) {
+        throw new Error(`groups: group "${group.id}" has empty memberIds`);
       }
       for (const memberId of group.memberIds) {
         if (memberGroupMap.has(memberId)) {
