@@ -704,30 +704,38 @@ export async function handleMoveElement(args: MoveElementArgs): Promise<object> 
         arrow.x + (pts[pts.length - 1]?.[0] ?? 0),
         arrow.y + (pts[pts.length - 1]?.[1] ?? 0),
       ];
-      const firstAttached = inBox(firstAbs[0], firstAbs[1]);
-      const lastAttached  = inBox(lastAbs[0],  lastAbs[1]);
+      const firstInBox = inBox(firstAbs[0], firstAbs[1]);
+      const lastInBox  = inBox(lastAbs[0],  lastAbs[1]);
 
       const newPts: [number, number][] = pts.map(p => [p[0], p[1]]);
       let newArrowX = arrow.x;
       let newArrowY = arrow.y;
 
-      if (firstAttached && lastAttached) {
-        // Self-loop: translate entire arrow
+      if (firstInBox && lastInBox) {
+        // Self-loop: both endpoints in box — translate entire arrow
         newArrowX += dx;
         newArrowY += dy;
         // points unchanged
-      } else if (firstAttached) {
-        // Shift origin, compensate all other points
-        newArrowX += dx;
-        newArrowY += dy;
-        for (let i = 1; i < newPts.length; i++) {
-          newPts[i] = [newPts[i]![0] - dx, newPts[i]![1] - dy];
+      } else {
+        // Determine attached endpoint by center distance (spec requirement)
+        const elCx = el.x + (el.width || 100) / 2;
+        const elCy = el.y + (el.height || 60) / 2;
+        const distFirst = Math.hypot(firstAbs[0] - elCx, firstAbs[1] - elCy);
+        const distLast  = Math.hypot(lastAbs[0]  - elCx, lastAbs[1]  - elCy);
+
+        if (distFirst <= distLast) {
+          // First point is attached — shift origin, compensate all other points
+          newArrowX += dx;
+          newArrowY += dy;
+          for (let i = 1; i < newPts.length; i++) {
+            newPts[i] = [newPts[i]![0] - dx, newPts[i]![1] - dy];
+          }
+          // newPts[0] stays [0,0]
+        } else {
+          // Last point is attached — shift only last point
+          const last = newPts[newPts.length - 1]!;
+          newPts[newPts.length - 1] = [last[0] + dx, last[1] + dy];
         }
-        // newPts[0] stays [0,0]
-      } else if (lastAttached) {
-        // Shift only last point
-        const last = newPts[newPts.length - 1]!;
-        newPts[newPts.length - 1] = [last[0] + dx, last[1] + dy];
       }
 
       updatedArrows.push({
