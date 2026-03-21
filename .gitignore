@@ -6,3 +6,4 @@ coverage
 mcp_excalidraw/
 library_cache/
 .claude/settings.local.json
+.worktrees/
