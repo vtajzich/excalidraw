@@ -228,8 +228,92 @@ export function routeArrow(
 
   const phase2CrossingCount = best.count;
   const origin = best.fromPt;
-  // Phase 3: lane routing — only when Phase 2 still has crossings
-  // (Phase 3 code goes here in Task 2)
+  if (phase2CrossingCount > 0 && obstacles.length > 0) {
+    // --- Vertical lanes (laneAxis: 'x') ---
+    const obsSortedX = [...obstacles].sort((a, b) => a.x - b.x);
+    const rawVLanes: number[] = [];
+    for (let i = 0; i < obsSortedX.length - 1; i++) {
+      const rightEdge = obsSortedX[i].x + obsSortedX[i].width;
+      const leftEdge  = obsSortedX[i + 1].x;
+      if (leftEdge - rightEdge >= 20) rawVLanes.push((rightEdge + leftEdge) / 2);
+    }
+    rawVLanes.push(Math.min(...obstacles.map(o => o.x)) - 40);
+    rawVLanes.push(Math.max(...obstacles.map(o => o.x + o.width)) + 40);
+    rawVLanes.sort((a, b) => a - b);
+    const vLanes = rawVLanes.filter((v, i) => i === 0 || v - rawVLanes[i - 1] >= 5);
+
+    // --- Horizontal lanes (laneAxis: 'y') ---
+    const obsSortedY = [...obstacles].sort((a, b) => a.y - b.y);
+    const rawHLanes: number[] = [];
+    for (let i = 0; i < obsSortedY.length - 1; i++) {
+      const bottomEdge = obsSortedY[i].y + obsSortedY[i].height;
+      const topEdge    = obsSortedY[i + 1].y;
+      if (topEdge - bottomEdge >= 20) rawHLanes.push((bottomEdge + topEdge) / 2);
+    }
+    rawHLanes.push(Math.min(...obstacles.map(o => o.y)) - 40);
+    rawHLanes.push(Math.max(...obstacles.map(o => o.y + o.height)) + 40);
+    rawHLanes.sort((a, b) => a - b);
+    const hLanes = rawHLanes.filter((v, i) => i === 0 || v - rawHLanes[i - 1] >= 5);
+
+    interface LaneCandidate {
+      waypoints: Point[];
+      fromPt: Point;
+      count: number;
+      totalLength: number;
+      axis: 'x' | 'y';
+      coord: number;
+    }
+    let winner: LaneCandidate | null = null;
+
+    function tryLane(waypoints: Point[], fp: Point, axis: 'x' | 'y', coord: number): void {
+      // Degenerate filter: discard if any two consecutive waypoints are identical
+      for (let i = 0; i < waypoints.length - 1; i++) {
+        if (waypoints[i][0] === waypoints[i + 1][0] && waypoints[i][1] === waypoints[i + 1][1]) return;
+      }
+      const count = countElbowIntersections(waypoints, obstacles);
+      const totalLength = waypoints.slice(1).reduce((sum, pt, i) => {
+        const prev = waypoints[i];
+        return sum + Math.hypot(pt[0] - prev[0], pt[1] - prev[1]);
+      }, 0);
+      if (!winner || count < winner.count || (count === winner.count && totalLength < winner.totalLength)) {
+        winner = { waypoints, fromPt: fp, count, totalLength, axis, coord };
+      }
+    }
+
+    for (const lx of vLanes) {
+      for (const fk of SIDES) {
+        for (const tk of SIDES) {
+          const fp = fromPts[fk];
+          const tp = toPts[tk];
+          tryLane([fp, [lx, fp[1]], [lx, tp[1]], tp], fp, 'x', lx);
+        }
+      }
+    }
+
+    for (const ly of hLanes) {
+      for (const fk of SIDES) {
+        for (const tk of SIDES) {
+          const fp = fromPts[fk];
+          const tp = toPts[tk];
+          tryLane([fp, [fp[0], ly], [tp[0], ly], tp], fp, 'y', ly);
+        }
+      }
+    }
+
+    if (winner !== null && (winner as LaneCandidate).count < phase2CrossingCount) {
+      const w = winner as LaneCandidate;
+      const laneOrigin = w.fromPt;
+      return {
+        points: w.waypoints.map(p => [p[0] - laneOrigin[0], p[1] - laneOrigin[1]] as Point),
+        elbowed: true,
+        fromPt: laneOrigin,
+        crossings: w.count,
+        routeType: 'lane',
+        laneAxis: w.axis,
+        laneCoord: w.coord,
+      };
+    }
+  }
   return {
     points: best.waypoints.map(p => [p[0] - origin[0], p[1] - origin[1]] as Point),
     elbowed: true,
