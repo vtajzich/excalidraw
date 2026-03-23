@@ -482,7 +482,7 @@ export function routeArrow(
       }
     }
 
-    if (winner !== null && (winner as LaneCandidate).count < phase2CrossingCount) {
+    if (winner !== null && (winner as LaneCandidate).count < phase25Crossings) {
       const w = winner as LaneCandidate;
       const laneOrigin = w.fromPt;
       return {
