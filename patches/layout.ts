@@ -232,7 +232,7 @@ export function routeArrow(
   options: RouteOptions = {}
 ): RouteResult {
   const SIDES: Side[] = ['top', 'right', 'bottom', 'left'];
-  const { gap = 0, startFocus, endFocus, entrySide: pinnedEntrySide } = options;
+  const { gap = 0, startFocus, endFocus, entrySide: pinnedEntrySide, flowDirection } = options;
   const targetSides: Side[] = pinnedEntrySide ? [pinnedEntrySide] : SIDES;
 
   const fromPts: Record<Side, Point> = {
@@ -256,8 +256,12 @@ export function routeArrow(
       const tp = toPts[tk];
       if (obstacles.some(obs => segmentIntersectsBox(fp, tp, obs))) continue;
       const dist = Math.hypot(fp[0] - tp[0], fp[1] - tp[1]);
-      if (!bestStraight || dist < bestStraight.dist) {
-        bestStraight = { fromPt: fp, toPt: tp, dist, exitSide: fk, entrySide: tk };
+      const flowAligned =
+        (flowDirection === 'TB' && fk === 'bottom' && tk === 'top') ||
+        (flowDirection === 'LR' && fk === 'right'  && tk === 'left');
+      const adjustedDist = flowAligned ? dist * 0.99 : dist;
+      if (!bestStraight || adjustedDist < bestStraight.dist) {
+        bestStraight = { fromPt: fp, toPt: tp, dist: adjustedDist, exitSide: fk, entrySide: tk };
       }
     }
   }
@@ -302,10 +306,11 @@ export function routeArrow(
           Math.hypot(mid[0] - fp[0], mid[1] - fp[1]) +
           Math.hypot(tp[0]  - mid[0], tp[1] - mid[1]);
 
+        const preferH = flowDirection !== 'LR';
         const better =
           !best ||
           count < best.count ||
-          (count === best.count && isH && !best.isHorizontalFirst) ||
+          (count === best.count && (preferH ? isH && !best.isHorizontalFirst : !isH && best.isHorizontalFirst)) ||
           (count === best.count && isH === best.isHorizontalFirst && totalLength < best.totalLength);
 
         if (better) {
@@ -756,7 +761,10 @@ export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> 
     .filter(e => e.id !== args.fromId && e.id !== args.toId && e.type !== 'arrow' && e.width && e.height)
     .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-  const { points, elbowed, fromPt, crossings, routeType, laneAxis, laneCoord } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP });
+  const dx = Math.abs((toBox.x + toBox.width / 2) - (fromBox.x + fromBox.width / 2));
+  const dy = Math.abs((toBox.y + toBox.height / 2) - (fromBox.y + fromBox.height / 2));
+  const inferredFlow: 'TB' | 'LR' = dy > dx ? 'TB' : 'LR';
+  const { points, elbowed, fromPt, crossings, routeType, laneAxis, laneCoord } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP, flowDirection: inferredFlow });
 
   const arrowId = generateId();
   const arrow: CanvasElement = {
@@ -944,7 +952,10 @@ export async function handleMoveElement(args: MoveElementArgs): Promise<object> 
       .filter(e => e.id !== args.id && e.id !== otherId && e.id !== arrow.id && e.type !== 'arrow' && e.width && e.height)
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-    const { points, elbowed, fromPt } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP });
+    const mdx = Math.abs((toBox.x + toBox.width / 2) - (fromBox.x + fromBox.width / 2));
+    const mdy = Math.abs((toBox.y + toBox.height / 2) - (fromBox.y + fromBox.height / 2));
+    const moveInferredFlow: 'TB' | 'LR' = mdy > mdx ? 'TB' : 'LR';
+    const { points, elbowed, fromPt } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP, flowDirection: moveInferredFlow });
 
     updatedArrows.push({
       id: arrow.id,
@@ -1023,7 +1034,8 @@ async function handleEdgesOnly(
       .filter(e => e.id !== edge.fromId && e.id !== edge.toId && e.type !== 'arrow' && e.width && e.height)
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP });
+    const flowDirection: 'TB' | 'LR' = args.direction === 'left-right' ? 'LR' : 'TB';
+    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP, flowDirection });
     if (edgeCrossings > 0) {
       routingSummary.withCrossings++;
       routingSummary.edges.push({ fromId: edge.fromId, toId: edge.toId, crossings: edgeCrossings, type: edgeRouteType });
@@ -1228,7 +1240,8 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
       .filter(e => !layoutNodeIds.has(e.id) && e.width && e.height && e.type !== 'arrow')
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromPos, toPos, obstacles, { gap: DEFAULT_GAP });
+    const applyFlowDirection: 'TB' | 'LR' = args.direction === 'left-right' ? 'LR' : 'TB';
+    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromPos, toPos, obstacles, { gap: DEFAULT_GAP, flowDirection: applyFlowDirection });
     if (edgeCrossings > 0) {
       routingSummary.withCrossings++;
       routingSummary.edges.push({ fromId: edge.fromId, toId: edge.toId, crossings: edgeCrossings, type: edgeRouteType });

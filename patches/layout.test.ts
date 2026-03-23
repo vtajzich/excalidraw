@@ -418,6 +418,40 @@ test('routeArrow with gap=0: fromPt at exact boundary', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Direction-aware scoring (Fix 5)
+// ---------------------------------------------------------------------------
+console.log('\nrouteArrow — direction-aware scoring (Fix 5)');
+
+test('TB flow: prefers bottom→top straight path', () => {
+  const from2 = { x: 0, y: 0,   width: 100, height: 60 };
+  const to2   = { x: 0, y: 200, width: 100, height: 60 };
+  const result = routeArrow(from2, to2, [], { flowDirection: 'TB' });
+  assert.strictEqual(result.exitSide, 'bottom');
+  assert.strictEqual(result.entrySide, 'top');
+});
+
+test('LR flow: prefers right→left straight path', () => {
+  const from = { x: 0,   y: 200, width: 100, height: 60 };
+  const to   = { x: 200, y: 0,   width: 100, height: 60 };
+  const result = routeArrow(from, to, [], { flowDirection: 'LR' });
+  assert.strictEqual(result.exitSide, 'right');
+});
+
+test('LR flow elbow: prefers vertical-first when crossings tie', () => {
+  const from     = { x: 0,   y: 0,   width: 80, height: 60 };
+  const to       = { x: 300, y: 300, width: 80, height: 60 };
+  const obstacle = { x: 120, y: 120, width: 80, height: 80 };
+  const resultLR = routeArrow(from, to, [obstacle], { flowDirection: 'LR' });
+  if (resultLR.routeType === 'elbow') {
+    const pts = resultLR.points;
+    if (pts.length === 3) {
+      const midX = resultLR.fromPt[0] + pts[1]![0];
+      assert.ok(Math.abs(midX - resultLR.fromPt[0]) < 10);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);
