@@ -566,6 +566,52 @@ test('snapLanes: snapped coordinate intersecting obstacle reverts', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Integration: example diagram routing quality
+// ---------------------------------------------------------------------------
+console.log('\nIntegration: example diagram routing quality');
+
+test('example diagram: epic→svc arrows have 0 crossings with side-exit routing', () => {
+  const filePath = path.join(
+    new URL('.', import.meta.url).pathname,
+    '../docs/example-diagram/example-diagram.excalidraw'
+  );
+  if (!fs.existsSync(filePath)) {
+    console.log('    (skipped — example diagram not found)');
+    return;
+  }
+  const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  const elements = data.elements;
+
+  // Find all epic→svc relationships (epics: id starts with 'e' followed by digit, svcs: id starts with 'svc-')
+  const epicIds = new Set(elements.filter((e: any) => /^e\d+$/.test(e.id)).map((e: any) => e.id));
+  const svcIds = new Set(elements.filter((e: any) => e.id.startsWith('svc-')).map((e: any) => e.id));
+
+  // Route each epic→svc pair through obstacles
+  let totalCrossings = 0;
+  for (const arrow of elements.filter((e: any) => e.type === 'arrow')) {
+    const startId = arrow.start?.id || arrow.startBinding?.elementId;
+    const endId = arrow.end?.id || arrow.endBinding?.elementId;
+    if (!startId || !endId) continue;
+    if (!epicIds.has(startId) || !svcIds.has(endId)) continue;
+
+    const fromEl = elements.find((e: any) => e.id === startId);
+    const toEl = elements.find((e: any) => e.id === endId);
+    if (!fromEl || !toEl) continue;
+
+    const fromBox = { x: fromEl.x, y: fromEl.y, width: fromEl.width, height: fromEl.height };
+    const toBox = { x: toEl.x, y: toEl.y, width: toEl.width, height: toEl.height };
+    const obstacles = elements
+      .filter((e: any) => e.id !== startId && e.id !== endId && e.type !== 'arrow' && e.width && e.height)
+      .map((e: any) => ({ x: e.x, y: e.y, width: e.width, height: e.height }));
+
+    const result = routeArrow(fromBox, toBox, obstacles, { gap: 8, flowDirection: 'TB' });
+    totalCrossings += result.crossings;
+  }
+
+  assert.ok(totalCrossings <= 2, `Expected ≤2 total crossings for epic→svc arrows, got ${totalCrossings}`);
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed`);
