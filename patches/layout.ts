@@ -1337,8 +1337,13 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
     if (!fromPos || !toPos) continue;
 
     const obstacles = allElements
-      .filter(e => !layoutNodeIds.has(e.id) && e.width && e.height && e.type !== 'arrow')
-      .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
+      .filter(e => e.id !== edge.fromId && e.id !== edge.toId && e.type !== 'arrow' && e.width && e.height)
+      .map(e => {
+        const pos = posMap.get(e.id);
+        return pos
+          ? { x: pos.x, y: pos.y, width: pos.width, height: pos.height }
+          : { x: e.x, y: e.y, width: e.width!, height: e.height! };
+      });
 
     const applyFlowDirection: 'TB' | 'LR' = args.direction === 'left-right' ? 'LR' : 'TB';
     const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromPos, toPos, obstacles, { gap: DEFAULT_GAP, flowDirection: applyFlowDirection });
