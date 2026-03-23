@@ -59,6 +59,37 @@ type Point = [number, number];
 type Box = { x: number; y: number; width: number; height: number };
 type SideMidpoints = { top: Point; bottom: Point; left: Point; right: Point };
 
+type Side = 'top' | 'bottom' | 'left' | 'right';
+
+interface RouteOptions {
+  flowDirection?: 'TB' | 'LR';
+  startFocus?: number;
+  endFocus?: number;
+  gap?: number;
+  preferSide?: Side;
+  entrySide?: Side;
+}
+
+interface RouteResult {
+  points: Point[];
+  elbowed: boolean;
+  fromPt: Point;
+  crossings: number;
+  routeType: 'straight' | 'elbow' | 'side-exit' | 'lane';
+  exitSide: Side;
+  entrySide: Side;
+  laneAxis?: 'x' | 'y';
+  laneCoord?: number;
+}
+
+const DEFAULT_GAP = 8;
+const MIN_LANE_GAP = 20;
+const LANE_OUTER_MARGIN = 40;
+const LANE_DEDUP_THRESHOLD = 5;
+const LANE_SNAP_THRESHOLD = 30;
+const FAN_OUT_RANGE = 0.7;
+const AXIS_DOMINANCE_THRESHOLD = 20;
+
 // ---------------------------------------------------------------------------
 // Geometry — pure functions, no I/O
 // ---------------------------------------------------------------------------
@@ -134,6 +165,39 @@ export function countElbowIntersections(waypoints: Point[], obstacles: Box[]): n
   return count;
 }
 
+interface DetectedLanes {
+  vertical: number[];
+  horizontal: number[];
+}
+
+export function detectLanes(obstacles: Box[]): DetectedLanes {
+  const obsSortedX = [...obstacles].sort((a, b) => a.x - b.x);
+  const rawV: number[] = [];
+  for (let i = 0; i < obsSortedX.length - 1; i++) {
+    const re = obsSortedX[i]!.x + obsSortedX[i]!.width;
+    const le = obsSortedX[i + 1]!.x;
+    if (le - re >= MIN_LANE_GAP) rawV.push((re + le) / 2);
+  }
+  rawV.push(Math.min(...obstacles.map(o => o.x)) - LANE_OUTER_MARGIN);
+  rawV.push(Math.max(...obstacles.map(o => o.x + o.width)) + LANE_OUTER_MARGIN);
+  rawV.sort((a, b) => a - b);
+  const vertical = rawV.filter((v, i) => i === 0 || v - rawV[i - 1]! >= LANE_DEDUP_THRESHOLD);
+
+  const obsSortedY = [...obstacles].sort((a, b) => a.y - b.y);
+  const rawH: number[] = [];
+  for (let i = 0; i < obsSortedY.length - 1; i++) {
+    const be = obsSortedY[i]!.y + obsSortedY[i]!.height;
+    const te = obsSortedY[i + 1]!.y;
+    if (te - be >= MIN_LANE_GAP) rawH.push((be + te) / 2);
+  }
+  rawH.push(Math.min(...obstacles.map(o => o.y)) - LANE_OUTER_MARGIN);
+  rawH.push(Math.max(...obstacles.map(o => o.y + o.height)) + LANE_OUTER_MARGIN);
+  rawH.sort((a, b) => a - b);
+  const horizontal = rawH.filter((v, i) => i === 0 || v - rawH[i - 1]! >= LANE_DEDUP_THRESHOLD);
+
+  return { vertical, horizontal };
+}
+
 /**
  * Route an arrow between two elements. Returns relative points[] and elbowed flag.
  * Tries all 16 side-midpoint pairs (4 sides × 4 sides) to find the best path:
@@ -144,14 +208,15 @@ export function countElbowIntersections(waypoints: Point[], obstacles: Box[]): n
 export function routeArrow(
   from: Box,
   to: Box,
-  obstacles: Box[]
-): { points: Point[]; elbowed: boolean; fromPt: Point; crossings: number; routeType: 'straight' | 'elbow' | 'lane'; laneAxis?: 'x' | 'y'; laneCoord?: number } {
-  const SIDES: (keyof SideMidpoints)[] = ['top', 'right', 'bottom', 'left'];
+  obstacles: Box[],
+  options: RouteOptions = {}
+): RouteResult {
+  const SIDES: Side[] = ['top', 'right', 'bottom', 'left'];
   const fromPts = getSideMidpoints(from);
   const toPts   = getSideMidpoints(to);
 
   // Phase 1: find the shortest clear straight path across all 16 pairs
-  let bestStraight: { fromPt: Point; toPt: Point; dist: number } | null = null;
+  let bestStraight: { fromPt: Point; toPt: Point; dist: number; exitSide: Side; entrySide: Side } | null = null;
   for (const fk of SIDES) {
     for (const tk of SIDES) {
       const fp = fromPts[fk];
@@ -159,19 +224,21 @@ export function routeArrow(
       if (obstacles.some(obs => segmentIntersectsBox(fp, tp, obs))) continue;
       const dist = Math.hypot(fp[0] - tp[0], fp[1] - tp[1]);
       if (!bestStraight || dist < bestStraight.dist) {
-        bestStraight = { fromPt: fp, toPt: tp, dist };
+        bestStraight = { fromPt: fp, toPt: tp, dist, exitSide: fk, entrySide: tk };
       }
     }
   }
 
   if (bestStraight) {
-    const { fromPt, toPt } = bestStraight;
+    const { fromPt, toPt, exitSide, entrySide } = bestStraight;
     return {
       points: [[0, 0], [toPt[0] - fromPt[0], toPt[1] - fromPt[1]]],
       elbowed: false,
       fromPt,
       crossings: 0,
       routeType: 'straight',
+      exitSide,
+      entrySide,
     };
   }
 
@@ -182,6 +249,8 @@ export function routeArrow(
     count: number;
     isHorizontalFirst: boolean;
     totalLength: number;
+    exitSide: Side;
+    entrySide: Side;
   }
   let best: ElbowCandidate | null = null;
 
@@ -207,7 +276,7 @@ export function routeArrow(
           (count === best.count && isH === best.isHorizontalFirst && totalLength < best.totalLength);
 
         if (better) {
-          best = { waypoints, fromPt: fp, count, isHorizontalFirst: isH, totalLength };
+          best = { waypoints, fromPt: fp, count, isHorizontalFirst: isH, totalLength, exitSide: fk, entrySide: tk };
         }
       }
     }
@@ -223,37 +292,15 @@ export function routeArrow(
       fromPt: fp,
       crossings: 0,
       routeType: 'elbow',
+      exitSide: 'right',
+      entrySide: 'left',
     };
   }
 
   const phase2CrossingCount = best.count;
   const origin = best.fromPt;
   if (phase2CrossingCount > 0 && obstacles.length > 0) {
-    // --- Vertical lanes (laneAxis: 'x') ---
-    const obsSortedX = [...obstacles].sort((a, b) => a.x - b.x);
-    const rawVLanes: number[] = [];
-    for (let i = 0; i < obsSortedX.length - 1; i++) {
-      const rightEdge = obsSortedX[i].x + obsSortedX[i].width;
-      const leftEdge  = obsSortedX[i + 1].x;
-      if (leftEdge - rightEdge >= 20) rawVLanes.push((rightEdge + leftEdge) / 2);
-    }
-    rawVLanes.push(Math.min(...obstacles.map(o => o.x)) - 40);
-    rawVLanes.push(Math.max(...obstacles.map(o => o.x + o.width)) + 40);
-    rawVLanes.sort((a, b) => a - b);
-    const vLanes = rawVLanes.filter((v, i) => i === 0 || v - rawVLanes[i - 1] >= 5);
-
-    // --- Horizontal lanes (laneAxis: 'y') ---
-    const obsSortedY = [...obstacles].sort((a, b) => a.y - b.y);
-    const rawHLanes: number[] = [];
-    for (let i = 0; i < obsSortedY.length - 1; i++) {
-      const bottomEdge = obsSortedY[i].y + obsSortedY[i].height;
-      const topEdge    = obsSortedY[i + 1].y;
-      if (topEdge - bottomEdge >= 20) rawHLanes.push((bottomEdge + topEdge) / 2);
-    }
-    rawHLanes.push(Math.min(...obstacles.map(o => o.y)) - 40);
-    rawHLanes.push(Math.max(...obstacles.map(o => o.y + o.height)) + 40);
-    rawHLanes.sort((a, b) => a - b);
-    const hLanes = rawHLanes.filter((v, i) => i === 0 || v - rawHLanes[i - 1] >= 5);
+    const { vertical: vLanes, horizontal: hLanes } = detectLanes(obstacles);
 
     interface LaneCandidate {
       waypoints: Point[];
@@ -262,21 +309,23 @@ export function routeArrow(
       totalLength: number;
       axis: 'x' | 'y';
       coord: number;
+      exitSide: Side;
+      entrySide: Side;
     }
     let winner: LaneCandidate | null = null;
 
-    function tryLane(waypoints: Point[], fp: Point, axis: 'x' | 'y', coord: number): void {
+    function tryLane(waypoints: Point[], fp: Point, axis: 'x' | 'y', coord: number, es: Side, ns: Side): void {
       // Degenerate filter: discard if any two consecutive waypoints are identical
       for (let i = 0; i < waypoints.length - 1; i++) {
-        if (waypoints[i][0] === waypoints[i + 1][0] && waypoints[i][1] === waypoints[i + 1][1]) return;
+        if (waypoints[i]![0] === waypoints[i + 1]![0] && waypoints[i]![1] === waypoints[i + 1]![1]) return;
       }
       const count = countElbowIntersections(waypoints, obstacles);
       const totalLength = waypoints.slice(1).reduce((sum, pt, i) => {
-        const prev = waypoints[i];
+        const prev = waypoints[i]!;
         return sum + Math.hypot(pt[0] - prev[0], pt[1] - prev[1]);
       }, 0);
       if (!winner || count < winner.count || (count === winner.count && totalLength < winner.totalLength)) {
-        winner = { waypoints, fromPt: fp, count, totalLength, axis, coord };
+        winner = { waypoints, fromPt: fp, count, totalLength, axis, coord, exitSide: es, entrySide: ns };
       }
     }
 
@@ -285,7 +334,7 @@ export function routeArrow(
         for (const tk of SIDES) {
           const fp = fromPts[fk];
           const tp = toPts[tk];
-          tryLane([fp, [lx, fp[1]], [lx, tp[1]], tp], fp, 'x', lx);
+          tryLane([fp, [lx, fp[1]], [lx, tp[1]], tp], fp, 'x', lx, fk, tk);
         }
       }
     }
@@ -295,7 +344,7 @@ export function routeArrow(
         for (const tk of SIDES) {
           const fp = fromPts[fk];
           const tp = toPts[tk];
-          tryLane([fp, [fp[0], ly], [tp[0], ly], tp], fp, 'y', ly);
+          tryLane([fp, [fp[0], ly], [tp[0], ly], tp], fp, 'y', ly, fk, tk);
         }
       }
     }
@@ -311,6 +360,8 @@ export function routeArrow(
         routeType: 'lane',
         laneAxis: w.axis,
         laneCoord: w.coord,
+        exitSide: w.exitSide,
+        entrySide: w.entrySide,
       };
     }
   }
@@ -320,6 +371,8 @@ export function routeArrow(
     fromPt: origin,
     crossings: best.count,
     routeType: 'elbow',
+    exitSide: best.exitSide,
+    entrySide: best.entrySide,
   };
 }
 
