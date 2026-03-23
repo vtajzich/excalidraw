@@ -1387,7 +1387,7 @@ async function handleEdgesOnly(
         .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
       const rerouted = routeArrow(fromBox, toBox, fanObstacles, {
-        gap: DEFAULT_GAP,
+        gap: arrowGap,
         endFocus: focus,
         entrySide: re.entrySide,
       });
@@ -1709,7 +1709,7 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
         });
 
       const rerouted = routeArrow(fromBox, toBox, fanObstacles, {
-        gap: DEFAULT_GAP,
+        gap: arrowGap,
         endFocus: focus,
         entrySide: re.entrySide,
       });
