@@ -82,6 +82,19 @@ interface RouteResult {
   laneCoord?: number;
 }
 
+interface RoutedEdge {
+  arrowId: string;
+  fromId: string;
+  toId: string;
+  entrySide: Side;
+  exitSide: Side;
+  fromPt: Point;
+  points: Point[];
+  elbowed: boolean;
+  laneCoord?: number;
+  laneAxis?: 'x' | 'y';
+}
+
 const DEFAULT_GAP = 8;
 const MIN_LANE_GAP = 20;
 const LANE_OUTER_MARGIN = 40;
@@ -1144,18 +1157,6 @@ async function handleEdgesOnly(
     edges: [] as { fromId: string; toId: string; crossings: number; type: string }[],
   };
 
-  interface RoutedEdge {
-    arrowId: string;
-    fromId: string;
-    toId: string;
-    entrySide: Side;
-    exitSide: Side;
-    fromPt: Point;
-    points: Point[];
-    elbowed: boolean;
-    laneCoord?: number;
-    laneAxis?: 'x' | 'y';
-  }
   const routedEdges: RoutedEdge[] = [];
 
   for (const edge of args.edges) {
@@ -1441,19 +1442,7 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
     edges: [] as { fromId: string; toId: string; crossings: number; type: string }[],
   };
 
-  interface RoutedEdgeAL {
-    arrowId: string;
-    fromId: string;
-    toId: string;
-    entrySide: Side;
-    exitSide: Side;
-    fromPt: Point;
-    points: Point[];
-    elbowed: boolean;
-    laneCoord?: number;
-    laneAxis?: 'x' | 'y';
-  }
-  const routedEdgesAL: RoutedEdgeAL[] = [];
+  const routedEdgesAL: RoutedEdge[] = [];
 
   for (const edge of args.edges) {
     const fromPos = posMap.get(edge.fromId);
@@ -1522,7 +1511,7 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
   }
 
   // Fan-out post-pass: spread arrows sharing the same (targetId, entrySide)
-  const targetGroupsAL = new Map<string, RoutedEdgeAL[]>();
+  const targetGroupsAL = new Map<string, RoutedEdge[]>();
   for (const re of routedEdgesAL) {
     const key = `${re.toId}:${re.entrySide}`;
     const group = targetGroupsAL.get(key) ?? [];
