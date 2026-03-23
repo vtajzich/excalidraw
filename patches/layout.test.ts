@@ -295,7 +295,7 @@ test('cross-axis selection: horizontal lane wins when it has fewer crossings', (
   const obs  = [{ x: -200, y: 100, width: 600, height: 200 }];
   const result = routeArrow(from, to, obs);
   assert.ok(typeof result.crossings === 'number', 'has crossings field');
-  assert.ok(['elbow', 'lane'].includes(result.routeType), `routeType is ${result.routeType}`);
+  assert.ok(['elbow', 'lane', 'side-exit'].includes(result.routeType), `routeType is ${result.routeType}`);
 });
 
 test('Phase 3 prefers lane path with 0 crossings over Phase 2 with 1 crossing', () => {
@@ -310,7 +310,7 @@ test('Phase 3 prefers lane path with 0 crossings over Phase 2 with 1 crossing', 
   const from2 = { x: 0,   y: 0,  width: 60, height: 60 };
   const to2   = { x: 200, y: 50, width: 60, height: 60 };
   const result = routeArrow(from2, to2, obs);
-  assert.strictEqual(result.routeType, 'lane', `expected lane, got ${result.routeType}`);
+  assert.ok(result.routeType === 'lane' || result.routeType === 'side-exit', `expected lane or side-exit, got ${result.routeType}`);
   assert.strictEqual(result.crossings, 0, `expected 0 crossings, got ${result.crossings}`);
 });
 
@@ -449,6 +449,64 @@ test('LR flow elbow: prefers vertical-first when crossings tie', () => {
       assert.ok(Math.abs(midX - resultLR.fromPt[0]) < 10);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2.5 — side-exit obstacle avoidance (Fix 1)
+// ---------------------------------------------------------------------------
+console.log('\nrouteArrow — Phase 2.5 side-exit obstacle avoidance');
+
+test('Phase 2.5: 3 stacked obstacles — picks side-exit with 0 crossings', () => {
+  const from = { x: 100, y: 500, width: 100, height: 60 };
+  const to   = { x: 100, y: 0,   width: 100, height: 60 };
+  const obs  = [
+    { x: 80, y: 100, width: 140, height: 60 },
+    { x: 80, y: 220, width: 140, height: 60 },
+    { x: 80, y: 340, width: 140, height: 60 },
+  ];
+  const result = routeArrow(from, to, obs, { gap: 0 });
+  assert.strictEqual(result.crossings, 0);
+  assert.ok(result.routeType === 'side-exit' || result.routeType === 'lane');
+  assert.ok(result.points.length >= 3);
+});
+
+test('Phase 2.5: no obstacles — Phase 1 straight path wins', () => {
+  const from = { x: 100, y: 300, width: 100, height: 60 };
+  const to   = { x: 100, y: 0,   width: 100, height: 60 };
+  const result = routeArrow(from, to, [], { gap: 0 });
+  assert.strictEqual(result.routeType, 'straight');
+  assert.strictEqual(result.crossings, 0);
+});
+
+test('Phase 2.5: LR layout stacked row — exits top/bottom', () => {
+  const from = { x: 0,   y: 100, width: 60, height: 100 };
+  const to   = { x: 500, y: 100, width: 60, height: 100 };
+  const obs  = [
+    { x: 100, y: 100, width: 60, height: 100 },
+    { x: 220, y: 100, width: 60, height: 100 },
+    { x: 340, y: 100, width: 60, height: 100 },
+  ];
+  const result = routeArrow(from, to, obs, { gap: 0, flowDirection: 'LR' });
+  assert.strictEqual(result.crossings, 0);
+  assert.ok(result.exitSide === 'top' || result.exitSide === 'bottom');
+});
+
+test('Phase 2.5: preferSide forces specific exit', () => {
+  const from = { x: 100, y: 500, width: 100, height: 60 };
+  const to   = { x: 100, y: 0,   width: 100, height: 60 };
+  const obs  = [
+    { x: 100, y: 220, width: 100, height: 60 },
+  ];
+  const result = routeArrow(from, to, obs, { gap: 0, preferSide: 'left' });
+  if (result.routeType === 'side-exit') {
+    assert.strictEqual(result.exitSide, 'left');
+  }
+});
+
+test('Phase 2.5: self-loop skips side-exit', () => {
+  const box = { x: 100, y: 100, width: 100, height: 60 };
+  const result = routeArrow(box, box, [], { gap: 0 });
+  assert.ok(result.routeType !== 'side-exit');
 });
 
 // ---------------------------------------------------------------------------

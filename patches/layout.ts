@@ -337,7 +337,102 @@ export function routeArrow(
 
   const phase2CrossingCount = best.count;
   const origin = best.fromPt;
-  if (phase2CrossingCount > 0 && obstacles.length > 0) {
+
+  // Phase 2.5: Side-exit routing — only if Phase 2 has crossings and not self-loop
+  const isSelfLoop = from.x === to.x && from.y === to.y && from.width === to.width && from.height === to.height;
+  let phase25Result: RouteResult | null = null;
+
+  if (phase2CrossingCount > 0 && obstacles.length > 0 && !isSelfLoop) {
+    const srcCx = from.x + from.width / 2;
+    const srcCy = from.y + from.height / 2;
+    const tgtCx = to.x + to.width / 2;
+    const tgtCy = to.y + to.height / 2;
+    const adx = Math.abs(tgtCx - srcCx);
+    const ady = Math.abs(tgtCy - srcCy);
+
+    let exitSides: Side[];
+    if (options.preferSide) {
+      exitSides = [options.preferSide];
+    } else if (flowDirection === 'TB') {
+      exitSides = ['left', 'right'];
+    } else if (flowDirection === 'LR') {
+      exitSides = ['top', 'bottom'];
+    } else if (Math.abs(adx - ady) < AXIS_DOMINANCE_THRESHOLD) {
+      exitSides = ['top', 'right', 'bottom', 'left'];
+    } else if (ady > adx) {
+      exitSides = ['left', 'right'];
+    } else {
+      exitSides = ['top', 'bottom'];
+    }
+
+    const entrySides25: Side[] = pinnedEntrySide ? [pinnedEntrySide] : ['top', 'right', 'bottom', 'left'];
+    const { vertical: vLanes25, horizontal: hLanes25 } = detectLanes(obstacles);
+
+    interface SideExitCandidate {
+      waypoints: Point[];
+      fromPt: Point;
+      count: number;
+      totalLength: number;
+      exitSide: Side;
+      entrySide: Side;
+    }
+    let bestSE: SideExitCandidate | null = null;
+
+    for (const es of exitSides) {
+      for (const ns of entrySides25) {
+        const fp = fromPts[es];
+        const tp = toPts[ns];
+        const lanes = (es === 'left' || es === 'right') ? vLanes25 : hLanes25;
+
+        for (const laneCoord of lanes) {
+          let waypoints: Point[];
+          if (es === 'left' || es === 'right') {
+            waypoints = [fp, [laneCoord, fp[1]], [laneCoord, tp[1]], tp];
+          } else {
+            waypoints = [fp, [fp[0], laneCoord], [tp[0], laneCoord], tp];
+          }
+
+          let degenerate = false;
+          for (let i = 0; i < waypoints.length - 1; i++) {
+            if (waypoints[i]![0] === waypoints[i + 1]![0] && waypoints[i]![1] === waypoints[i + 1]![1]) {
+              degenerate = true;
+              break;
+            }
+          }
+          if (degenerate) continue;
+
+          const count = countElbowIntersections(waypoints, obstacles);
+          const totalLength = waypoints.slice(1).reduce((sum, pt, i) => {
+            const prev = waypoints[i]!;
+            return sum + Math.hypot(pt[0] - prev[0], pt[1] - prev[1]);
+          }, 0);
+
+          if (!bestSE || count < bestSE.count || (count === bestSE.count && totalLength < bestSE.totalLength)) {
+            bestSE = { waypoints, fromPt: fp, count, totalLength, exitSide: es, entrySide: ns };
+          }
+        }
+      }
+    }
+
+    if (bestSE && bestSE.count < phase2CrossingCount) {
+      phase25Result = {
+        points: bestSE.waypoints.map(p => [p[0] - bestSE!.fromPt[0], p[1] - bestSE!.fromPt[1]] as Point),
+        elbowed: true,
+        fromPt: bestSE.fromPt,
+        crossings: bestSE.count,
+        routeType: 'side-exit',
+        exitSide: bestSE.exitSide,
+        entrySide: bestSE.entrySide,
+      };
+    }
+  }
+
+  if (phase25Result && phase25Result.crossings === 0) {
+    return phase25Result;
+  }
+
+  const phase25Crossings = phase25Result?.crossings ?? phase2CrossingCount;
+  if (phase25Crossings > 0 && obstacles.length > 0) {
     const { vertical: vLanes, horizontal: hLanes } = detectLanes(obstacles);
 
     interface LaneCandidate {
@@ -403,6 +498,11 @@ export function routeArrow(
       };
     }
   }
+
+  if (phase25Result && phase25Result.crossings < phase2CrossingCount) {
+    return phase25Result;
+  }
+
   return {
     points: best.waypoints.map(p => [p[0] - origin[0], p[1] - origin[1]] as Point),
     elbowed: true,
