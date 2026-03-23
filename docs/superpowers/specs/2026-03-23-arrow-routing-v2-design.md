@@ -47,7 +47,7 @@ The Excalidraw arrow element already supports `startBinding` and `endBinding` ob
 
 ### Obstacle filtering in `apply_layout`
 
-The current `handleApplyLayout` excludes layout nodes from the obstacle set (line 1141-1143). This must be changed: for arrow routing, ALL elements except the source and target should be obstacles. The fix: pass all positioned elements as obstacles, excluding only the current arrow's source and target. This is a prerequisite for Phase 2.5 to work correctly in `apply_layout`.
+The current `handleApplyLayout` Phase 4 loop filters `layoutNodeIds` out of the obstacle set when calling `routeArrow`. This must be changed: for arrow routing, ALL positioned elements except the current arrow's source and target should be obstacles. The `handleEdgesOnly` code path already does this correctly. This is a prerequisite for Phase 2.5 to work correctly in `apply_layout`.
 
 ## Design
 
@@ -97,10 +97,10 @@ Phase 3:   Lane routing — only if Phase 2.5 crossings > 0 (was: Phase 2)
 
 After all edges are routed in Phase 4, run a fan-out post-pass:
 
-1. Group routed arrows by `(targetElementId, entrySide)`. The `entrySide` is derived from the arrow's routing result: for a straight/elbow path, it is the side of the target element closest to the last path segment's approach direction (top if arriving from above, right if arriving from the right, etc.). For side-exit/lane paths, it is the entry side selected during routing.
+1. Group routed arrows by `(targetElementId, entrySide)`. `entrySide` is computed inside `routeArrow` for ALL route types and returned as a non-optional field in `RouteResult`. Derivation: for straight paths, the side whose outward normal is most aligned with the vector from second-to-last point to last point. For elbow/side-exit/lane paths, the entry side selected during candidate scoring. When re-routing with pinned focus (step 4), `entrySide` is also pinned as a constraint — the re-route must use the same entry side as the initial grouping.
 2. For each group with N > 1:
    - Sort arrows by source element position (x-coordinate for top/bottom entry, y-coordinate for left/right entry) to maintain spatial coherence.
-   - Assign focus values evenly spread from `-0.7` to `+0.7`. Formula: `focus[i] = -0.7 + 1.4 * i / (N - 1)` for N > 1; `focus[0] = 0` for N = 1.
+   - Assign focus values evenly spread from `-FAN_OUT_RANGE` to `+FAN_OUT_RANGE`. Formula: `focus[i] = -FAN_OUT_RANGE + 2 * FAN_OUT_RANGE * i / (N - 1)` for N > 1; `focus[0] = 0` for N = 1.
    - Update `endBinding.focus` on each arrow.
    - Recompute endpoint coordinates to match the new focus position.
 3. Repeat for `(sourceElementId, exitSide)` groups — spread start points.
@@ -116,8 +116,9 @@ After routing the new arrow:
 
 1. Query existing arrows sharing the same `(targetElementId, entrySide)`.
 2. If group size becomes N > 1, re-spread all arrows in the group using the same algorithm.
-3. Update existing arrows on the canvas in-place.
-4. Return the new arrow's routing metadata as normal.
+3. Also check `(sourceElementId, exitSide)` groups for the new arrow's source — mirror both grouping passes from Level 1.
+4. Update existing arrows on the canvas in-place.
+5. Return the new arrow's routing metadata as normal.
 
 Calling `create_arrow` N times produces the same fan-out as `apply_layout`.
 
@@ -198,7 +199,7 @@ After fan-out assigns spread focus values:
    - Both use side-exit routing (Phase 2.5 or 3)
    - Both exit from the same side (e.g., both exit right)
    - Their routing lane coordinates are within `LANE_SNAP_THRESHOLD` (default 30px) of each other
-   - They target the same element, or elements within the same row/column
+   - They target the same element, or elements within the same row/column (defined as center-y within `nodeSep` pixels for same-row, center-x within `nodeSep` for same-column)
 2. **Snap to shared lane:** set all lane coordinates in the group to the median value. After snapping, validate that the shared lane coordinate does not intersect any obstacle bounding box. If it does, skip snapping for that group and keep individual lane coordinates.
 3. **Result:** arrows share a vertical (or horizontal) spine and branch only at endpoints.
 
@@ -289,8 +290,8 @@ interface RouteResult {
   fromPt: Point;      // start attachment point, includes gap offset
   crossings: number;
   routeType: 'straight' | 'elbow' | 'side-exit' | 'lane';
-  exitSide?: 'top' | 'bottom' | 'left' | 'right';   // side arrow exits source
-  entrySide?: 'top' | 'bottom' | 'left' | 'right';  // side arrow enters target
+  exitSide: 'top' | 'bottom' | 'left' | 'right';    // side arrow exits source
+  entrySide: 'top' | 'bottom' | 'left' | 'right';   // side arrow enters target
   laneAxis?: 'x' | 'y';
   laneCoord?: number;
 }
