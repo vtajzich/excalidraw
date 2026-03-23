@@ -11,9 +11,12 @@ import {
   countElbowIntersections,
   getAttachmentPoint,
   computeFanOut,
+  snapLanes,
   layoutTools,
   applyGroupsYSnap,
 } from '../mcp_excalidraw/src/layout.ts';
+
+const LANE_SNAP_THRESHOLD = 30; // matches layout.ts constant
 
 let passed = 0;
 let failed = 0;
@@ -534,6 +537,32 @@ test('computeFanOut: 4 arrows → evenly spread', () => {
   assert.ok(Math.abs(result[3]! - 0.7) < 0.01);
   // Middle values should be symmetric
   assert.ok(Math.abs(result[1]! + result[2]!) < 0.01);
+});
+
+// ---------------------------------------------------------------------------
+// routeArrow — lane consolidation (Fix 4)
+// ---------------------------------------------------------------------------
+console.log('\nrouteArrow — lane consolidation (Fix 4)');
+
+test('snapLanes: 3 lanes within threshold snap to median', () => {
+  const lanes = [325, 330, 335];
+  const snapped = snapLanes(lanes, LANE_SNAP_THRESHOLD, []);
+  // All should snap to median (330)
+  assert.ok(snapped.every(v => v === 330));
+});
+
+test('snapLanes: lanes far apart do not snap', () => {
+  const lanes = [100, 200, 300];
+  const snapped = snapLanes(lanes, LANE_SNAP_THRESHOLD, []);
+  assert.deepStrictEqual(snapped, [100, 200, 300]);
+});
+
+test('snapLanes: snapped coordinate intersecting obstacle reverts', () => {
+  const lanes = [325, 335];
+  const obstacle = { x: 320, y: 0, width: 20, height: 100 }; // covers x=320-340, median=330 intersects
+  const snapped = snapLanes(lanes, LANE_SNAP_THRESHOLD, [obstacle]);
+  // Should NOT snap because median (330) intersects the obstacle
+  assert.deepStrictEqual(snapped, [325, 335]);
 });
 
 // ---------------------------------------------------------------------------

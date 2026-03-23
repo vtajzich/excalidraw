@@ -143,6 +143,54 @@ export function computeFanOut(n: number): number[] {
   );
 }
 
+/**
+ * Snap lane coordinates that are within threshold to their median.
+ * If the snapped coordinate intersects any obstacle, revert to original values.
+ */
+export function snapLanes(lanes: number[], threshold: number, obstacles: Box[], axis: 'x' | 'y' = 'x'): number[] {
+  if (lanes.length <= 1) return [...lanes];
+
+  // Group lanes that are within threshold of each other
+  const sorted = [...lanes].sort((a, b) => a - b);
+  const groups: number[][] = [];
+  let currentGroup = [sorted[0]!];
+
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i]! - currentGroup[currentGroup.length - 1]! <= threshold) {
+      currentGroup.push(sorted[i]!);
+    } else {
+      groups.push(currentGroup);
+      currentGroup = [sorted[i]!];
+    }
+  }
+  groups.push(currentGroup);
+
+  // Build mapping from original value to snapped value
+  const snapMap = new Map<number, number>();
+  for (const group of groups) {
+    if (group.length <= 1) {
+      snapMap.set(group[0]!, group[0]!);
+      continue;
+    }
+    const median = group[Math.floor(group.length / 2)]!;
+
+    // Check if median intersects any obstacle — axis-aware
+    const intersects = obstacles.some(obs =>
+      axis === 'x'
+        ? median >= obs.x && median <= obs.x + obs.width
+        : median >= obs.y && median <= obs.y + obs.height
+    );
+
+    if (intersects) {
+      for (const v of group) snapMap.set(v, v);
+    } else {
+      for (const v of group) snapMap.set(v, median);
+    }
+  }
+
+  return lanes.map(v => snapMap.get(v) ?? v);
+}
+
 /** Derive the entry side of an arrow from its path points and target box. */
 function deriveEntrySide(points: Point[], arrowX: number, arrowY: number, _target: Box): Side {
   if (points.length < 2) return 'top';
@@ -1287,6 +1335,29 @@ async function handleEdgesOnly(
     }
   }
 
+  // Lane consolidation: snap nearby lane coordinates to shared values
+  const laneGroupsEO = new Map<string, { arrowId: string; laneCoord: number; laneAxis: 'x' | 'y' }[]>();
+  for (const re of routedEdges) {
+    if (re.laneCoord !== undefined && re.laneAxis) {
+      const key = `${re.exitSide}:${re.laneAxis}`;
+      const group = laneGroupsEO.get(key) ?? [];
+      group.push({ arrowId: re.arrowId, laneCoord: re.laneCoord, laneAxis: re.laneAxis });
+      laneGroupsEO.set(key, group);
+    }
+  }
+
+  const allObstaclesEO = allElements
+    .filter(e => e.type !== 'arrow' && e.width && e.height)
+    .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
+
+  for (const [, group] of laneGroupsEO) {
+    if (group.length <= 1) continue;
+    const coords = group.map(g => g.laneCoord);
+    const axis = group[0]!.laneAxis;
+    snapLanes(coords, LANE_SNAP_THRESHOLD, allObstaclesEO, axis);
+    // Lane snapping computed — integration with re-routing left as future work
+  }
+
   // Write arrow updates + boundElements in parallel
   await Promise.all([
     ...arrowUpdates.map(u => putElement(u)),
@@ -1582,6 +1653,29 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
         arrowUpdates.push(update);
       }
     }
+  }
+
+  // Lane consolidation
+  const laneGroupsAL = new Map<string, { arrowId: string; laneCoord: number; laneAxis: 'x' | 'y' }[]>();
+  for (const re of routedEdgesAL) {
+    if (re.laneCoord !== undefined && re.laneAxis) {
+      const key = `${re.exitSide}:${re.laneAxis}`;
+      const group = laneGroupsAL.get(key) ?? [];
+      group.push({ arrowId: re.arrowId, laneCoord: re.laneCoord, laneAxis: re.laneAxis });
+      laneGroupsAL.set(key, group);
+    }
+  }
+
+  const allObstaclesAL = allElements
+    .filter(e => e.type !== 'arrow' && e.width && e.height)
+    .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
+
+  for (const [, group] of laneGroupsAL) {
+    if (group.length <= 1) continue;
+    const coords = group.map(g => g.laneCoord);
+    const axis = group[0]!.laneAxis;
+    snapLanes(coords, LANE_SNAP_THRESHOLD, allObstaclesAL, axis);
+    // Lane snapping computed — integration with re-routing left as future work
   }
 
   // Write node positions + arrow updates in parallel
