@@ -11,6 +11,7 @@ import {
   countElbowIntersections,
   layoutTools,
   applyGroupsYSnap,
+  getAttachmentPoint,
 } from '../mcp_excalidraw/src/layout.ts';
 
 let passed = 0;
@@ -369,6 +370,51 @@ test('init-b → svc-c routes via lane with 0 crossings', () => {
     result.routeType === 'lane' || result.routeType === 'elbow',
     `expected routeType 'lane' or 'elbow', got '${result.routeType}'`
   );
+});
+
+// ---------------------------------------------------------------------------
+// Gap control (Fix 3)
+// ---------------------------------------------------------------------------
+console.log('\ngetAttachmentPoint — gap control');
+
+test('getAttachmentPoint: right side with gap=8 offsets outward', () => {
+  const box = { x: 100, y: 100, width: 200, height: 100 };
+  const pt = getAttachmentPoint(box, 'right', 0, 8);
+  assert.deepStrictEqual(pt, [308, 150]);
+});
+
+test('getAttachmentPoint: top side with focus=0.5 shifts right along edge', () => {
+  const box = { x: 100, y: 100, width: 200, height: 100 };
+  const pt = getAttachmentPoint(box, 'top', 0.5, 0);
+  assert.deepStrictEqual(pt, [250, 100]);
+});
+
+test('getAttachmentPoint: bottom side with gap=8 and focus=-0.5', () => {
+  const box = { x: 100, y: 100, width: 200, height: 100 };
+  const pt = getAttachmentPoint(box, 'bottom', -0.5, 8);
+  assert.deepStrictEqual(pt, [150, 208]);
+});
+
+test('getAttachmentPoint: left side with gap=0 (backward compat)', () => {
+  const box = { x: 100, y: 100, width: 200, height: 100 };
+  const pt = getAttachmentPoint(box, 'left', 0, 0);
+  assert.deepStrictEqual(pt, [100, 150]);
+});
+
+test('routeArrow with gap=8: fromPt offset from element boundary', () => {
+  const from = { x: 100, y: 300, width: 100, height: 60 };
+  const to   = { x: 100, y: 0,   width: 100, height: 60 };
+  const result = routeArrow(from, to, [], { gap: 8 });
+  assert.strictEqual(result.routeType, 'straight');
+  assert.strictEqual(result.fromPt[1], 292);
+});
+
+test('routeArrow with gap=0: fromPt at exact boundary', () => {
+  const from = { x: 100, y: 300, width: 100, height: 60 };
+  const to   = { x: 100, y: 0,   width: 100, height: 60 };
+  const result = routeArrow(from, to, [], { gap: 0 });
+  assert.strictEqual(result.routeType, 'straight');
+  assert.strictEqual(result.fromPt[1], 300);
 });
 
 // ---------------------------------------------------------------------------

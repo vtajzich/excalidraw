@@ -103,6 +103,26 @@ export function getSideMidpoints(el: Box): SideMidpoints {
   };
 }
 
+export function getAttachmentPoint(
+  box: Box,
+  side: Side,
+  focus: number,
+  gap: number
+): Point {
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  switch (side) {
+    case 'top':
+      return [cx + focus * box.width / 2, box.y - gap];
+    case 'bottom':
+      return [cx + focus * box.width / 2, box.y + box.height + gap];
+    case 'left':
+      return [box.x - gap, cy + focus * box.height / 2];
+    case 'right':
+      return [box.x + box.width + gap, cy + focus * box.height / 2];
+  }
+}
+
 /**
  * Returns true if segment p1→p2 properly crosses the boundary of box.
  * Uses strict segment-crossing test: returns false if segment is entirely inside,
@@ -212,13 +232,26 @@ export function routeArrow(
   options: RouteOptions = {}
 ): RouteResult {
   const SIDES: Side[] = ['top', 'right', 'bottom', 'left'];
-  const fromPts = getSideMidpoints(from);
-  const toPts   = getSideMidpoints(to);
+  const { gap = 0, startFocus, endFocus, entrySide: pinnedEntrySide } = options;
+  const targetSides: Side[] = pinnedEntrySide ? [pinnedEntrySide] : SIDES;
+
+  const fromPts: Record<Side, Point> = {
+    top: getAttachmentPoint(from, 'top', startFocus ?? 0, gap),
+    bottom: getAttachmentPoint(from, 'bottom', startFocus ?? 0, gap),
+    left: getAttachmentPoint(from, 'left', startFocus ?? 0, gap),
+    right: getAttachmentPoint(from, 'right', startFocus ?? 0, gap),
+  };
+  const toPts: Record<Side, Point> = {
+    top: getAttachmentPoint(to, 'top', endFocus ?? 0, gap),
+    bottom: getAttachmentPoint(to, 'bottom', endFocus ?? 0, gap),
+    left: getAttachmentPoint(to, 'left', endFocus ?? 0, gap),
+    right: getAttachmentPoint(to, 'right', endFocus ?? 0, gap),
+  };
 
   // Phase 1: find the shortest clear straight path across all 16 pairs
   let bestStraight: { fromPt: Point; toPt: Point; dist: number; exitSide: Side; entrySide: Side } | null = null;
   for (const fk of SIDES) {
-    for (const tk of SIDES) {
+    for (const tk of targetSides) {
       const fp = fromPts[fk];
       const tp = toPts[tk];
       if (obstacles.some(obs => segmentIntersectsBox(fp, tp, obs))) continue;
@@ -255,7 +288,7 @@ export function routeArrow(
   let best: ElbowCandidate | null = null;
 
   for (const fk of SIDES) {
-    for (const tk of SIDES) {
+    for (const tk of targetSides) {
       const fp = fromPts[fk];
       const tp = toPts[tk];
 
@@ -331,7 +364,7 @@ export function routeArrow(
 
     for (const lx of vLanes) {
       for (const fk of SIDES) {
-        for (const tk of SIDES) {
+        for (const tk of targetSides) {
           const fp = fromPts[fk];
           const tp = toPts[tk];
           tryLane([fp, [lx, fp[1]], [lx, tp[1]], tp], fp, 'x', lx, fk, tk);
@@ -341,7 +374,7 @@ export function routeArrow(
 
     for (const ly of hLanes) {
       for (const fk of SIDES) {
-        for (const tk of SIDES) {
+        for (const tk of targetSides) {
           const fp = fromPts[fk];
           const tp = toPts[tk];
           tryLane([fp, [fp[0], ly], [tp[0], ly], tp], fp, 'y', ly, fk, tk);
@@ -723,7 +756,7 @@ export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> 
     .filter(e => e.id !== args.fromId && e.id !== args.toId && e.type !== 'arrow' && e.width && e.height)
     .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-  const { points, elbowed, fromPt, crossings, routeType, laneAxis, laneCoord } = routeArrow(fromBox, toBox, obstacles);
+  const { points, elbowed, fromPt, crossings, routeType, laneAxis, laneCoord } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP });
 
   const arrowId = generateId();
   const arrow: CanvasElement = {
@@ -735,8 +768,8 @@ export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> 
     height: 0,
     points: points as [number, number][],
     elbowed,
-    start: { id: args.fromId, gap: 8 },
-    end:   { id: args.toId,   gap: 8 },
+    start: { id: args.fromId, gap: DEFAULT_GAP },
+    end:   { id: args.toId,   gap: DEFAULT_GAP },
     strokeColor: args.color || '#1e1e1e',
     strokeStyle: args.style || 'solid',
     startArrowhead: args.startArrowhead !== undefined ? args.startArrowhead : null,
@@ -911,7 +944,7 @@ export async function handleMoveElement(args: MoveElementArgs): Promise<object> 
       .filter(e => e.id !== args.id && e.id !== otherId && e.id !== arrow.id && e.type !== 'arrow' && e.width && e.height)
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-    const { points, elbowed, fromPt } = routeArrow(fromBox, toBox, obstacles);
+    const { points, elbowed, fromPt } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP });
 
     updatedArrows.push({
       id: arrow.id,
@@ -990,7 +1023,7 @@ async function handleEdgesOnly(
       .filter(e => e.id !== edge.fromId && e.id !== edge.toId && e.type !== 'arrow' && e.width && e.height)
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromBox, toBox, obstacles);
+    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP });
     if (edgeCrossings > 0) {
       routingSummary.withCrossings++;
       routingSummary.edges.push({ fromId: edge.fromId, toId: edge.toId, crossings: edgeCrossings, type: edgeRouteType });
@@ -1008,8 +1041,8 @@ async function handleEdgesOnly(
         width: 0, height: 0,
         points: points as [number, number][],
         elbowed,
-        start: { id: edge.fromId, gap: 8 },
-        end:   { id: edge.toId,   gap: 8 },
+        start: { id: edge.fromId, gap: DEFAULT_GAP },
+        end:   { id: edge.toId,   gap: DEFAULT_GAP },
         strokeColor: '#1e1e1e',
         strokeStyle: 'solid',
         startArrowhead: null,
@@ -1195,7 +1228,7 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
       .filter(e => !layoutNodeIds.has(e.id) && e.width && e.height && e.type !== 'arrow')
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
-    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromPos, toPos, obstacles);
+    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromPos, toPos, obstacles, { gap: DEFAULT_GAP });
     if (edgeCrossings > 0) {
       routingSummary.withCrossings++;
       routingSummary.edges.push({ fromId: edge.fromId, toId: edge.toId, crossings: edgeCrossings, type: edgeRouteType });
@@ -1213,8 +1246,8 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
         width: 0, height: 0,
         points: points as [number, number][],
         elbowed,
-        start: { id: edge.fromId, gap: 8 },
-        end:   { id: edge.toId,   gap: 8 },
+        start: { id: edge.fromId, gap: DEFAULT_GAP },
+        end:   { id: edge.toId,   gap: DEFAULT_GAP },
         strokeColor: '#1e1e1e',
         strokeStyle: 'solid',
         startArrowhead: null,
