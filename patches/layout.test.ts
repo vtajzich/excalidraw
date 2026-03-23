@@ -9,9 +9,10 @@ import {
   routeArrow,
   segmentIntersectsBox,
   countElbowIntersections,
+  getAttachmentPoint,
+  computeFanOut,
   layoutTools,
   applyGroupsYSnap,
-  getAttachmentPoint,
 } from '../mcp_excalidraw/src/layout.ts';
 
 let passed = 0;
@@ -507,6 +508,32 @@ test('Phase 2.5: self-loop skips side-exit', () => {
   const box = { x: 100, y: 100, width: 100, height: 60 };
   const result = routeArrow(box, box, [], { gap: 0 });
   assert.ok(result.routeType !== 'side-exit');
+});
+
+// ---------------------------------------------------------------------------
+// Auto fan-out (Fix 2)
+// ---------------------------------------------------------------------------
+
+test('computeFanOut: 3 arrows → focus spread [-0.7, 0, 0.7]', () => {
+  const result = computeFanOut(3);
+  assert.strictEqual(result.length, 3);
+  assert.ok(Math.abs(result[0]! - (-0.7)) < 0.01);
+  assert.ok(Math.abs(result[1]! - 0) < 0.01);
+  assert.ok(Math.abs(result[2]! - 0.7) < 0.01);
+});
+
+test('computeFanOut: 1 arrow → focus [0]', () => {
+  const result = computeFanOut(1);
+  assert.deepStrictEqual(result, [0]);
+});
+
+test('computeFanOut: 4 arrows → evenly spread', () => {
+  const result = computeFanOut(4);
+  assert.strictEqual(result.length, 4);
+  assert.ok(Math.abs(result[0]! - (-0.7)) < 0.01);
+  assert.ok(Math.abs(result[3]! - 0.7) < 0.01);
+  // Middle values should be symmetric
+  assert.ok(Math.abs(result[1]! + result[2]!) < 0.01);
 });
 
 // ---------------------------------------------------------------------------

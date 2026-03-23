@@ -123,6 +123,29 @@ export function getAttachmentPoint(
   }
 }
 
+export function computeFanOut(n: number): number[] {
+  if (n <= 1) return [0];
+  return Array.from({ length: n }, (_, i) =>
+    -FAN_OUT_RANGE + 2 * FAN_OUT_RANGE * i / (n - 1)
+  );
+}
+
+/** Derive the entry side of an arrow from its path points and target box. */
+function deriveEntrySide(points: Point[], arrowX: number, arrowY: number, _target: Box): Side {
+  if (points.length < 2) return 'top';
+  const lastPt: Point = [arrowX + points[points.length - 1]![0], arrowY + points[points.length - 1]![1]];
+  const prevPt: Point = [arrowX + points[points.length - 2]![0], arrowY + points[points.length - 2]![1]];
+  const dx = lastPt[0] - prevPt[0];
+  const dy = lastPt[1] - prevPt[1];
+
+  // The entry side is the side the arrow is approaching FROM
+  if (Math.abs(dx) > Math.abs(dy)) {
+    return dx > 0 ? 'left' : 'right'; // approaching from left → enters left side
+  } else {
+    return dy > 0 ? 'top' : 'bottom'; // approaching from above → enters top side
+  }
+}
+
 /**
  * Returns true if segment p1→p2 properly crosses the boundary of box.
  * Uses strict segment-crossing test: returns false if segment is entirely inside,
@@ -1121,6 +1144,20 @@ async function handleEdgesOnly(
     edges: [] as { fromId: string; toId: string; crossings: number; type: string }[],
   };
 
+  interface RoutedEdge {
+    arrowId: string;
+    fromId: string;
+    toId: string;
+    entrySide: Side;
+    exitSide: Side;
+    fromPt: Point;
+    points: Point[];
+    elbowed: boolean;
+    laneCoord?: number;
+    laneAxis?: 'x' | 'y';
+  }
+  const routedEdges: RoutedEdge[] = [];
+
   for (const edge of args.edges) {
     const fromEl = elementMap.get(edge.fromId);
     const toEl   = elementMap.get(edge.toId);
@@ -1135,7 +1172,7 @@ async function handleEdgesOnly(
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
     const flowDirection: 'TB' | 'LR' = args.direction === 'left-right' ? 'LR' : 'TB';
-    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP, flowDirection });
+    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType, exitSide, entrySide, laneAxis, laneCoord } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP, flowDirection });
     if (edgeCrossings > 0) {
       routingSummary.withCrossings++;
       routingSummary.edges.push({ fromId: edge.fromId, toId: edge.toId, crossings: edgeCrossings, type: edgeRouteType });
@@ -1172,8 +1209,81 @@ async function handleEdgesOnly(
       });
     }
 
+    routedEdges.push({
+      arrowId: arrowId!,
+      fromId: edge.fromId,
+      toId: edge.toId,
+      entrySide,
+      exitSide,
+      fromPt,
+      points: points as Point[],
+      elbowed,
+      laneAxis,
+      laneCoord,
+    });
+
     if (fromEl) accumulateBound(fromEl, arrowId);
     if (toEl)   accumulateBound(toEl,   arrowId);
+  }
+
+  // Fan-out post-pass: spread arrows sharing the same (targetId, entrySide)
+  const targetGroups = new Map<string, RoutedEdge[]>();
+  for (const re of routedEdges) {
+    const key = `${re.toId}:${re.entrySide}`;
+    const group = targetGroups.get(key) ?? [];
+    group.push(re);
+    targetGroups.set(key, group);
+  }
+
+  for (const [, group] of targetGroups) {
+    if (group.length <= 1) continue;
+    const toEl = elementMap.get(group[0]!.toId);
+    if (!toEl) continue;
+    const toBox: Box = { x: toEl.x, y: toEl.y, width: toEl.width || 100, height: toEl.height || 60 };
+
+    // Sort by source position for spatial coherence
+    const entrySide = group[0]!.entrySide;
+    group.sort((a, b) => {
+      const aEl = elementMap.get(a.fromId);
+      const bEl = elementMap.get(b.fromId);
+      if (!aEl || !bEl) return 0;
+      return (entrySide === 'top' || entrySide === 'bottom')
+        ? aEl.x - bEl.x
+        : aEl.y - bEl.y;
+    });
+
+    const focusValues = computeFanOut(group.length);
+    for (let i = 0; i < group.length; i++) {
+      const re = group[i]!;
+      const focus = focusValues[i]!;
+      const fromEl = elementMap.get(re.fromId);
+      if (!fromEl) continue;
+      const fromBox: Box = { x: fromEl.x, y: fromEl.y, width: fromEl.width || 100, height: fromEl.height || 60 };
+
+      const fanObstacles = allElements
+        .filter(e => e.id !== re.fromId && e.id !== re.toId && e.type !== 'arrow' && e.width && e.height)
+        .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
+
+      const rerouted = routeArrow(fromBox, toBox, fanObstacles, {
+        gap: DEFAULT_GAP,
+        endFocus: focus,
+        entrySide: re.entrySide,
+      });
+
+      const existingIdx = arrowUpdates.findIndex(u => u.id === re.arrowId);
+      const update = {
+        id: re.arrowId,
+        x: rerouted.fromPt[0],
+        y: rerouted.fromPt[1],
+        points: rerouted.points as [number, number][],
+        elbowed: rerouted.elbowed,
+      };
+      if (existingIdx >= 0) {
+        arrowUpdates[existingIdx] = update;
+      } else {
+        arrowUpdates.push(update);
+      }
+    }
   }
 
   // Write arrow updates + boundElements in parallel
@@ -1331,6 +1441,20 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
     edges: [] as { fromId: string; toId: string; crossings: number; type: string }[],
   };
 
+  interface RoutedEdgeAL {
+    arrowId: string;
+    fromId: string;
+    toId: string;
+    entrySide: Side;
+    exitSide: Side;
+    fromPt: Point;
+    points: Point[];
+    elbowed: boolean;
+    laneCoord?: number;
+    laneAxis?: 'x' | 'y';
+  }
+  const routedEdgesAL: RoutedEdgeAL[] = [];
+
   for (const edge of args.edges) {
     const fromPos = posMap.get(edge.fromId);
     const toPos   = posMap.get(edge.toId);
@@ -1346,7 +1470,7 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
       });
 
     const applyFlowDirection: 'TB' | 'LR' = args.direction === 'left-right' ? 'LR' : 'TB';
-    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType } = routeArrow(fromPos, toPos, obstacles, { gap: DEFAULT_GAP, flowDirection: applyFlowDirection });
+    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType, exitSide, entrySide, laneAxis, laneCoord } = routeArrow(fromPos, toPos, obstacles, { gap: DEFAULT_GAP, flowDirection: applyFlowDirection });
     if (edgeCrossings > 0) {
       routingSummary.withCrossings++;
       routingSummary.edges.push({ fromId: edge.fromId, toId: edge.toId, crossings: edgeCrossings, type: edgeRouteType });
@@ -1377,11 +1501,98 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
       arrowUpdates.push({ id: arrowId, x: fromPt[0], y: fromPt[1], points: points as [number, number][], elbowed });
     }
 
+    routedEdgesAL.push({
+      arrowId: arrowId!,
+      fromId: edge.fromId,
+      toId: edge.toId,
+      entrySide,
+      exitSide,
+      fromPt,
+      points: points as Point[],
+      elbowed,
+      laneAxis,
+      laneCoord,
+    });
+
     // Accumulate boundElements (merged per element to avoid write-after-write)
     const fromEl = allElements.find(e => e.id === edge.fromId);
     const toEl   = allElements.find(e => e.id === edge.toId);
     if (fromEl) accumulateBound(fromEl, arrowId);
     if (toEl)   accumulateBound(toEl,   arrowId);
+  }
+
+  // Fan-out post-pass: spread arrows sharing the same (targetId, entrySide)
+  const targetGroupsAL = new Map<string, RoutedEdgeAL[]>();
+  for (const re of routedEdgesAL) {
+    const key = `${re.toId}:${re.entrySide}`;
+    const group = targetGroupsAL.get(key) ?? [];
+    group.push(re);
+    targetGroupsAL.set(key, group);
+  }
+
+  for (const [, group] of targetGroupsAL) {
+    if (group.length <= 1) continue;
+    const toId = group[0]!.toId;
+    const toPosEntry = posMap.get(toId);
+    const toElFallback = elementMap.get(toId);
+    const toElPos = toPosEntry ?? toElFallback;
+    if (!toElPos) continue;
+    const toBox: Box = { x: toElPos.x, y: toElPos.y, width: toElPos.width || 100, height: toElPos.height || 60 };
+
+    // Sort by source position for spatial coherence
+    const entrySide = group[0]!.entrySide;
+    group.sort((a, b) => {
+      const aPosEntry = posMap.get(a.fromId);
+      const aElFallback = elementMap.get(a.fromId);
+      const aEl = aPosEntry ?? aElFallback;
+      const bPosEntry = posMap.get(b.fromId);
+      const bElFallback = elementMap.get(b.fromId);
+      const bEl = bPosEntry ?? bElFallback;
+      if (!aEl || !bEl) return 0;
+      return (entrySide === 'top' || entrySide === 'bottom')
+        ? aEl.x - bEl.x
+        : aEl.y - bEl.y;
+    });
+
+    const focusValues = computeFanOut(group.length);
+    for (let i = 0; i < group.length; i++) {
+      const re = group[i]!;
+      const focus = focusValues[i]!;
+      const fromPosEntry = posMap.get(re.fromId);
+      const fromElFallback = elementMap.get(re.fromId);
+      const fromElPos = fromPosEntry ?? fromElFallback;
+      if (!fromElPos) continue;
+      const fromBox: Box = { x: fromElPos.x, y: fromElPos.y, width: fromElPos.width || 100, height: fromElPos.height || 60 };
+
+      const fanObstacles = allElements
+        .filter(e => e.id !== re.fromId && e.id !== re.toId && e.type !== 'arrow' && e.width && e.height)
+        .map(e => {
+          const pos = posMap.get(e.id);
+          return pos
+            ? { x: pos.x, y: pos.y, width: pos.width, height: pos.height }
+            : { x: e.x, y: e.y, width: e.width!, height: e.height! };
+        });
+
+      const rerouted = routeArrow(fromBox, toBox, fanObstacles, {
+        gap: DEFAULT_GAP,
+        endFocus: focus,
+        entrySide: re.entrySide,
+      });
+
+      const existingIdx = arrowUpdates.findIndex(u => u.id === re.arrowId);
+      const update = {
+        id: re.arrowId,
+        x: rerouted.fromPt[0],
+        y: rerouted.fromPt[1],
+        points: rerouted.points as [number, number][],
+        elbowed: rerouted.elbowed,
+      };
+      if (existingIdx >= 0) {
+        arrowUpdates[existingIdx] = update;
+      } else {
+        arrowUpdates.push(update);
+      }
+    }
   }
 
   // Write node positions + arrow updates in parallel
