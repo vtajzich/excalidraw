@@ -29,6 +29,7 @@ export interface LayoutSpacing {
   nodeSep?: number;
   rankSep?: number;
   padding?: number;
+  arrowGap?: number;
 }
 
 export interface LayoutGroup {
@@ -930,6 +931,11 @@ interface CreateArrowArgs {
   startArrowhead?: 'arrow' | 'dot' | 'bar' | null;
   endArrowhead?: 'arrow' | 'dot' | 'bar' | null;
   color?: string;
+  startFocus?: number;
+  endFocus?: number;
+  gap?: number;
+  flowDirection?: 'TB' | 'LR';
+  preferSide?: 'top' | 'bottom' | 'left' | 'right';
 }
 
 export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> {
@@ -948,7 +954,15 @@ export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> 
   const dx = Math.abs((toBox.x + toBox.width / 2) - (fromBox.x + fromBox.width / 2));
   const dy = Math.abs((toBox.y + toBox.height / 2) - (fromBox.y + fromBox.height / 2));
   const inferredFlow: 'TB' | 'LR' = dy > dx ? 'TB' : 'LR';
-  const { points, elbowed, fromPt, crossings, routeType, laneAxis, laneCoord } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP, flowDirection: inferredFlow });
+  const routeOpts: RouteOptions = {
+    gap: args.gap ?? DEFAULT_GAP,
+    flowDirection: args.flowDirection ?? inferredFlow,
+    startFocus: args.startFocus,
+    endFocus: args.endFocus,
+    preferSide: args.preferSide,
+  };
+  const { points, elbowed, fromPt, crossings, routeType, exitSide, entrySide, laneAxis, laneCoord } =
+    routeArrow(fromBox, toBox, obstacles, routeOpts);
 
   const arrowId = generateId();
   const arrow: CanvasElement = {
@@ -980,11 +994,69 @@ export async function handleCreateArrow(args: CreateArrowArgs): Promise<object> 
     await Promise.all(bindUpdates.map(u => putElement(u)));
   }
 
-  const routing: Record<string, unknown> = { type: routeType, crossings };
+  const routing: Record<string, unknown> = { type: routeType, crossings, exitSide, entrySide };
   if (routeType === 'lane') {
     if (laneAxis === 'x') routing.laneX = laneCoord;
     else if (laneAxis === 'y') routing.laneY = laneCoord;
+    if (laneAxis !== undefined) routing.laneAxis = laneAxis;
+    if (laneCoord !== undefined) routing.laneCoord = laneCoord;
   }
+
+  // Incremental fan-out: re-spread arrows sharing same (targetId, entrySide)
+  if (!args.startFocus && !args.endFocus) {  // skip if user pinned focus
+    const allEls = await fetchAllElements();
+    const targetArrows = allEls.filter(e =>
+      e.type === 'arrow' &&
+      (e.end?.id === args.toId || (e as any).endBinding?.elementId === args.toId)
+    );
+
+    if (targetArrows.length > 1) {
+      const sameEntry = targetArrows.filter(a => {
+        const side = deriveEntrySide(
+          a.points as Point[],
+          a.x, a.y,
+          toBox
+        );
+        return side === entrySide;
+      });
+
+      if (sameEntry.length > 1) {
+        const focusValues = computeFanOut(sameEntry.length);
+        // Sort by source position for spatial coherence
+        sameEntry.sort((a, b) => {
+          const aStart = a.start?.id || (a as any).startBinding?.elementId;
+          const bStart = b.start?.id || (b as any).startBinding?.elementId;
+          const aEl = allEls.find(e => e.id === aStart);
+          const bEl = allEls.find(e => e.id === bStart);
+          if (!aEl || !bEl) return 0;
+          return (entrySide === 'top' || entrySide === 'bottom')
+            ? aEl.x - bEl.x : aEl.y - bEl.y;
+        });
+
+        // Re-route each arrow with its assigned focus
+        for (let i = 0; i < sameEntry.length; i++) {
+          const a = sameEntry[i]!;
+          if (a.id === arrowId) continue; // skip newly created, already routed
+          const aStartId = a.start?.id || (a as any).startBinding?.elementId;
+          if (!aStartId) continue;
+          const aFromEl = allEls.find(e => e.id === aStartId);
+          if (!aFromEl) continue;
+          const aFromBox: Box = { x: aFromEl.x, y: aFromEl.y, width: aFromEl.width || 100, height: aFromEl.height || 60 };
+          const aObs = allEls
+            .filter(e => e.id !== aStartId && e.id !== args.toId && e.type !== 'arrow' && e.width && e.height)
+            .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
+          const rr = routeArrow(aFromBox, toBox, aObs, {
+            gap: DEFAULT_GAP, endFocus: focusValues[i]!, entrySide,
+          });
+          await putElement({
+            id: a.id, x: rr.fromPt[0], y: rr.fromPt[1],
+            points: rr.points as [number, number][], elbowed: rr.elbowed,
+          });
+        }
+      }
+    }
+  }
+
   return { id: arrowId, element: created, routing };
 }
 
@@ -1180,8 +1252,9 @@ interface ApplyLayoutArgs {
 
 async function handleEdgesOnly(
   args: ApplyLayoutArgs,
-  _spacing: Required<LayoutSpacing>
+  spacing: Required<LayoutSpacing>
 ): Promise<object> {
+  const arrowGap = spacing.arrowGap ?? DEFAULT_GAP;
   const allElements = await fetchAllElements();
   const elementMap = new Map(allElements.map(e => [e.id, e]));
 
@@ -1221,7 +1294,7 @@ async function handleEdgesOnly(
       .map(e => ({ x: e.x, y: e.y, width: e.width!, height: e.height! }));
 
     const flowDirection: 'TB' | 'LR' = args.direction === 'left-right' ? 'LR' : 'TB';
-    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType, exitSide, entrySide, laneAxis, laneCoord } = routeArrow(fromBox, toBox, obstacles, { gap: DEFAULT_GAP, flowDirection });
+    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType, exitSide, entrySide, laneAxis, laneCoord } = routeArrow(fromBox, toBox, obstacles, { gap: arrowGap, flowDirection });
     if (edgeCrossings > 0) {
       routingSummary.withCrossings++;
       routingSummary.edges.push({ fromId: edge.fromId, toId: edge.toId, crossings: edgeCrossings, type: edgeRouteType });
@@ -1378,7 +1451,9 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
     nodeSep: args.spacing?.nodeSep ?? 40,
     rankSep: args.spacing?.rankSep ?? 60,
     padding: args.spacing?.padding ?? 20,
+    arrowGap: args.spacing?.arrowGap ?? DEFAULT_GAP,
   };
+  const arrowGap = spacing.arrowGap;
 
   // Route to edges-only handler
   if (args.mode === 'edges-only') {
@@ -1530,7 +1605,7 @@ export async function handleApplyLayout(args: ApplyLayoutArgs): Promise<object> 
       });
 
     const applyFlowDirection: 'TB' | 'LR' = args.direction === 'left-right' ? 'LR' : 'TB';
-    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType, exitSide, entrySide, laneAxis, laneCoord } = routeArrow(fromPos, toPos, obstacles, { gap: DEFAULT_GAP, flowDirection: applyFlowDirection });
+    const { points, elbowed, fromPt, crossings: edgeCrossings, routeType: edgeRouteType, exitSide, entrySide, laneAxis, laneCoord } = routeArrow(fromPos, toPos, obstacles, { gap: arrowGap, flowDirection: applyFlowDirection });
     if (edgeCrossings > 0) {
       routingSummary.withCrossings++;
       routingSummary.edges.push({ fromId: edge.fromId, toId: edge.toId, crossings: edgeCrossings, type: edgeRouteType });
@@ -1741,6 +1816,7 @@ export const layoutTools: Tool[] = [
             nodeSep: { type: 'number', description: 'Dagre nodesep (px between siblings). Default: 40.' },
             rankSep: { type: 'number', description: 'Dagre ranksep (px between layers). Default: 60.' },
             padding: { type: 'number', description: 'Padding inside parent boxes. Default: 20.' },
+            arrowGap: { type: 'number', description: 'Pixel gap between arrowheads and element edges (default 8)' },
           },
         },
         mode: {
@@ -1792,6 +1868,11 @@ export const layoutTools: Tool[] = [
         startArrowhead: { type: 'string', enum: ['arrow', 'dot', 'bar'], nullable: true },
         endArrowhead:   { type: 'string', enum: ['arrow', 'dot', 'bar'], nullable: true, description: 'Default: arrow.' },
         color: { type: 'string' },
+        startFocus: { type: 'number', description: 'Pin start attachment position along element edge (-1 to 1)' },
+        endFocus: { type: 'number', description: 'Pin end attachment position along element edge (-1 to 1)' },
+        gap: { type: 'number', description: 'Pixel gap between arrowhead and element boundary (default 8)' },
+        flowDirection: { type: 'string', enum: ['TB', 'LR'], description: 'Bias routing for top-down or left-right flow' },
+        preferSide: { type: 'string', enum: ['left', 'right', 'top', 'bottom'], description: 'Hint which side to exit from' },
       },
       required: ['fromId', 'toId'],
     },
